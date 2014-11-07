@@ -19,9 +19,18 @@ class Firewall:
         # TODO: Also do some initialization if needed.
 
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
-    # @pkt: the actual data of the IPv4 packet (including IP header)
+    # @pkt: Python string that contains the actual data of the IPv4 packet (including IP header)
     def handle_packet(self, pkt_dir, pkt):
         # TODO: Your main firewall code will be here.
+        # Whenever a packet is captured, this handler will be invoked. 
+        
+        # PKT_DIR_INCOMING: The packet has been received from the ext interface. You
+        # need to call self.iface_int.send_ip_packet() to pass this packet.
+        # PKT_DIR_OUTGOING: The packet has been received from the int interface. You
+        # need to call self.iface_ext.send_ip_packet() to pass this packet.
+        
+        # To drop the packet, simply omit the call to .send_ip_packet()
+
         pass
 
     # TODO: You can add more methods as you want.
