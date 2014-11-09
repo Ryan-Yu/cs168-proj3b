@@ -19,10 +19,50 @@ class Firewall:
         # Initialize geo_id map, given the geo_id text file
         self.geo_id_map = self.initialize_geo_id_file("geoipdb.txt")
 
-        # Initialize DNS map, given the rules file
-        self.dns_map = self.initialize_dns_map(self.rules_file)
+        # Initialize DNS maps, given the rules file
+        self.exact_dns_map = {}
+        self.wild_card_dns_map = {}
+
+        self.initialize_all_maps(self.rules_file)
 
         # TODO: Initialize TCP, UDP, ICMP data structures  
+
+
+    def initialize_all_maps(self, rules_file):
+        for line in rules_file:
+            stripped_line = line.strip()
+            split_line = stripped_line.split(" ")
+            current_verdict = split_line[0].upper()
+            current_protocol = split_line[1].upper()
+           
+            # Handle DNS rule
+            if (current_protocol == "DNS"):
+
+               current_domain = split_line[2] 
+
+                # Wild card
+                if (split_line[2].startswith("*"):
+                    if (current_verdict == "PASS"):
+                        self.wild_card_dns_map[current_domain[1:]] = True
+                    # current verdict is DROP, so we set value to False
+                    else:
+                        self.wild_card_dns_map[current_domain[1:]] = False
+                # Exact match
+                else:
+                    if (current_verdict == "PASS"):
+                        self.exact_dns_map[current_domain] = True
+                    # Current verdict is DROP, so we set value to False
+                    else:
+                        self.exact_dns_map[current_domain] = False
+
+    
+
+            elif (current_protocol == "TCP"):
+                continue
+            elif (current_protocol == "UDP"):
+                continue
+            elif (current_protocol == "ICMP"):
+                continue
 
 
     '''
