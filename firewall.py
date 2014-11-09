@@ -15,8 +15,36 @@ class Firewall:
         print 'I am supposed to load rules from %s, but I am feeling lazy.' % \
                 config['rule']
 
-        # TODO: Load the GeoIP DB ('geoipdb.txt') as well.
-        # TODO: Also do some initialization if needed.
+        self.rules_file = config['rule']
+        # Initialize geo_id map, given the geo_id text file
+        self.geo_id_map = self.initialize_geo_id_file("geoipdb.txt")
+
+        # Initialize DNS map, given the rules file
+        self.dns_map = self.initialize_dns_map(self.rules_file)
+
+        # TODO: Initialize TCP, UDP, ICMP data structures  
+
+
+    '''
+    Returns a map of <country_code -> list of IP ranges corresponding to the country_code>
+    given a geo_id file ('filename' parameter)
+    '''
+    def initialize_geo_id_file(self, filename):
+        resultant_map = {}
+        read_in = open(filename)
+        for line in read_in:
+            stripped_line = line.strip()
+            current_line_split = stripped_line.split(" ")
+            current_country = current_line_split[2]
+            
+            if current_country not in resultant_map:
+                # Current country does not exist
+                resultant_map[current_country] = []
+
+            resultant_map[current_country].append((current_line_split[0], current_line_split[1]))
+        return resultant_map
+
+
 
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
     # @pkt: Python string that contains the actual data of the IPv4 packet (including IP header)
@@ -24,6 +52,17 @@ class Firewall:
         # TODO: Your main firewall code will be here.
         # Whenever a packet is captured, this handler will be invoked. 
         
+        src_ip = socket.inet_ntoa(pkt[12:16])
+        dst_ip = socket.inet_ntoa(pkt[16:20])
+
+        src_ip_array = src_ip.split(".")
+        dst_ip_array = dst_ip.split(".")
+        
+        
+
+
+        print("src_ip: " + src_ip + "; dst_ip: " + dst_ip)
+
         # PKT_DIR_INCOMING: The packet has been received from the ext interface. You
         # need to call self.iface_int.send_ip_packet() to pass this packet.
         # PKT_DIR_OUTGOING: The packet has been received from the int interface. You
@@ -31,7 +70,6 @@ class Firewall:
         
         # To drop the packet, simply omit the call to .send_ip_packet()
 
-        pass
 
     # TODO: You can add more methods as you want.
 

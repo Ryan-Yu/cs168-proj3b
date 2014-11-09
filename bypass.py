@@ -16,8 +16,15 @@ class Firewall:
     def handle_packet(self, pkt_dir, pkt):
         # The example code here prints out the source/destination IP addresses,
         # which is unnecessary for your submission.
+
+        print("The packet is: " + pkt)
+
         src_ip = pkt[12:16]
         dst_ip = pkt[16:20]
+
+        print("src_ip: " + socket.inet_ntoa(src_ip) + "; dst_ip: " + socket.inet_ntoa(dst_ip))
+        print(type(socket.inet_ntoa(src_ip)))
+
         ipid, = struct.unpack('!H', pkt[4:6])    # IP identifier (big endian)
         
         if pkt_dir == PKT_DIR_INCOMING:
