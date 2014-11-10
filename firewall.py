@@ -133,27 +133,62 @@ class Firewall:
             # Grab question count in DNS header
             question_count_offset = byte_offset + 12
             question_count = struct.unpack('!H', pkt[question_count_offset:(question_count_offset + 2)])[0]
-
             # Now we find the beginning of the QNAME field
             q_name_offset = question_count_offset + 8
 
             # Use q_name_offset to find the beginning of the q_type field
             q_type_offset = q_name_offset
             
-            while ord(pkt[q_type_offset:(q_type_offset + 1)]) is not 0:
-                q_type_offset += 1
-            q_type_offset += 1
+            # Build the name of the requested URL
+            q_name = ""
 
+            while ord(pkt[q_type_offset:(q_type_offset + 1)]) is not 0:
+                index = 0
+                current_length = ord(pkt[q_type_offset:(q_type_offset + 1)])
+                q_type_offset += 1
+                while (index < current_length):
+                    current_character = pkt[q_type_offset:(q_type_offset + 1)]
+                    q_name += current_character
+                    q_type_offset += 1
+                    index += 1
+                q_name += "."
+
+            # Move away from the 0 byte
+            q_type_offset += 1
+            q_name = q_name[:(len(q_name) - 1)]
+
+            print("our domain name is: " + q_name)
+
+            # At this point, q_name represents the URL that was requested, as a String
+            
             # At this point, q_type_offset is set correctly
             # Unpack q_type_offset
             q_type = struct.unpack('!H', pkt[q_type_offset:(q_type_offset + 2)])[0]
-            
+           
+            print("q_type: " + str(q_type))
+
             # Grab q_class and unpack it
             q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
-       
+        
+            
+
             # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
             if ((destination_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
-                print("We have found a DNS query packet!")
+                print("About to make decision on packet with name: " + q_name)
+                send_packet = self.make_decision_on_dns_packet(pkt, q_name)
+                if send_packet:
+                    if pkt_dir == PKT_DIR_INCOMING:
+                        self.iface_int.send_ip_packet(pkt)
+                    elif pkt_dir == PKT_DIR_OUTGOING:
+                        self.iface_ext.send_ip_packet(pkt)
+                else:
+                    print("We've dropped a packet.")
+                    return
+
+            # Current packet is a REGULAR UDP packet
+            else:
+                pass
+
 
         elif (packet_protocol_number == 6):
             # TCP
@@ -169,6 +204,11 @@ class Firewall:
         # IP packet
         else:
             pass
+
+        if pkt_dir == PKT_DIR_INCOMING:
+            self.iface_int.send_ip_packet(pkt)
+        elif pkt_dir == PKT_DIR_OUTGOING:
+            self.iface_ext.send_ip_packet(pkt)
         
 
 
@@ -180,6 +220,35 @@ class Firewall:
         # need to call self.iface_ext.send_ip_packet() to pass this packet.
         
         # To drop the packet, simply omit the call to .send_ip_packet()
+
+    '''
+    Returns true if the DNS packet that is requesting the domain 'domain_name'
+    should be passed, and returns false if the packet should be dropped
+    '''
+    def make_decision_on_dns_packet(self, packet, domain_name):
+        pass_packet_through = True
+        for (matched_domain_name, (type_of_match, verdict)) in self.dns_rules_list:
+            
+            # Exact matches
+            if (type_of_match == "EXACT"):
+                # If we've matched exactly...
+                if (matched_domain_name == domain_name):
+                    if (verdict == "DROP"):
+                        pass_packet_through = False
+                    elif (verdict == "PASS"):
+                        pass_packet_through = True
+            
+            # Wild card matches
+            else:  
+                # If we've matched our wild card
+                if (domain_name.endswith(matched_domain_name)):
+                    if (verdict == "DROP"):
+                        pass_packet_through = False
+                    elif (verdict == "PASS"):
+                        pass_packet_through = True
+
+                
+        return pass_packet_through
 
 
     # TODO: You can add more methods as you want.
