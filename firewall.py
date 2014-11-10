@@ -2,9 +2,13 @@
 
 from main import PKT_DIR_INCOMING, PKT_DIR_OUTGOING
 
+import socket
+import struct
+import time
+
 # TODO: Feel free to import any Python standard moduless as necessary.
 # (http://docs.python.org/2/library/)
-# You must NOT use any 3rd-party libraries, though.
+# You must not use any 3rd-party libraries, though.
 
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
@@ -23,15 +27,25 @@ class Firewall:
         self.exact_dns_map = {}
         self.wild_card_dns_map = {}
 
+        
+
         self.initialize_all_maps(self.rules_file)
+
+        print(self.exact_dns_map)
+        print(self.wild_card_dns_map)
 
         # TODO: Initialize TCP, UDP, ICMP data structures  
 
 
     def initialize_all_maps(self, rules_file):
-        for line in rules_file:
+        
+        rules = open(rules_file)
+        
+        # Iterate through each rule in rules file, handling different types of rules separately
+        for line in rules:
             stripped_line = line.strip()
             split_line = stripped_line.split(" ")
+            
             current_verdict = split_line[0].upper()
             current_protocol = split_line[1].upper()
            
@@ -40,22 +54,21 @@ class Firewall:
 
                current_domain = split_line[2] 
 
-                # Wild card
-                if (split_line[2].startswith("*"):
-                    if (current_verdict == "PASS"):
-                        self.wild_card_dns_map[current_domain[1:]] = True
-                    # current verdict is DROP, so we set value to False
-                    else:
-                        self.wild_card_dns_map[current_domain[1:]] = False
-                # Exact match
-                else:
-                    if (current_verdict == "PASS"):
-                        self.exact_dns_map[current_domain] = True
-                    # Current verdict is DROP, so we set value to False
-                    else:
-                        self.exact_dns_map[current_domain] = False
-
-    
+               # Wild card
+               # Entries look like: <current_domain, T/F>
+               if (split_line[2].startswith("*")):
+                   if (current_verdict == "PASS"):
+                       self.wild_card_dns_map[current_domain[1:]] = True
+                   # current verdict is DROP, so we set value to False
+                   else:
+                       self.wild_card_dns_map[current_domain[1:]] = False
+               # Exact match
+               else:
+                   if (current_verdict == "PASS"):
+                       self.exact_dns_map[current_domain] = True
+                   # Current verdict is DROP, so we set value to False
+                   else:
+                       self.exact_dns_map[current_domain] = False
 
             elif (current_protocol == "TCP"):
                 continue
@@ -97,7 +110,39 @@ class Firewall:
 
         src_ip_array = src_ip.split(".")
         dst_ip_array = dst_ip.split(".")
+
+        ip_header_length = ord(pkt[0:1]) & 0x0f
+        # i.e. number of bytes before UDP/TCP header begins
+        byte_offset = ip_header_length * 4
+
+        packet_protocol_number = ord(pkt[9:10])
         
+        # UDP case
+        if (packet_protocol_number == 17):
+            # If UDP, then source port is given by [20:22] and dst port given by [22:24]
+            
+            # pkt[byte_offset:(byte_offset + 2)] returns String representing source port
+            # struct.unpack then unpacks this String as a short, and returns it as a tuple with a blank second item
+            source_port = struct.unpack('!H', pkt[byte_offset:(byte_offset + 2)])[0]
+            destination_port = struct.unpack('!H', pkt[(byte_offset + 2):(byte_offset + 4)])[0]
+            
+            # If the following conditions are met, then we know current packet is a DNS query packet:
+            # (1) 
+
+        elif (packet_protocol_number == 6):
+            # TCP
+            pass
+
+        elif (packet_protocol_number == 1):
+            # ICMP
+            pass
+
+        # We encounter a DNS query packet
+        if (1 == 1):
+            pass
+        # IP packet
+        else:
+            pass
         
 
 
