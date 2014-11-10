@@ -10,6 +10,27 @@ import time
 # (http://docs.python.org/2/library/)
 # You must not use any 3rd-party libraries, though.
 
+class TCPRule:
+    def __init__(self, country_code=None, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict):
+        self.ip_range = (ip_lower_bound, ip_upper_bound)
+        self.verdict = verdict
+        self.port_range = (port_lower_bound, port_upper_bound)
+        self.country_code = country_code
+
+class UDPRule:
+    def __init__(self, country_code=None, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict):
+        self.ip_range = (ip_lower_bound, ip_upper_bound)
+        self.verdict = verdict
+        self.port_range = (port_lower_bound, port_upper_bound)
+        self.country_code = country_code
+
+class ICMPRule:
+    def __init__(self, country_code=None, ip_lower_bound, ip_upper_bound, icmp_type, verdict):
+        self.ip_range = (ip_lower_bound, ip_upper_bound)
+        self.verdict = verdict
+        self.icmp_type = icmp_type
+        self.country_code = country_code
+
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
@@ -210,6 +231,7 @@ class Firewall:
         
         print("src_ip: " + src_ip + "; dst_ip: " + dst_ip)
 
+
     '''
     Returns true if the DNS packet that is requesting the domain 'domain_name'
     should be passed, and returns false if the packet should be dropped
@@ -238,6 +260,13 @@ class Firewall:
                 
         return pass_packet_through
 
+
+    '''
+    Converts a CIDR IP address (i.e. 1.1.1.1/24) to an IP range.
+
+    i.e. (1.1.1.1/24) -> (1.1.1.0, 1.1.1.255)
+    '''
+    def convert_slash_notation_to_ip_range(ip_slash_notation):
 
     # TODO: You can add more methods as you want.
 
