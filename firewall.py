@@ -125,7 +125,35 @@ class Firewall:
             destination_port = struct.unpack('!H', pkt[(byte_offset + 2):(byte_offset + 4)])[0]
             
             # If the following conditions are met, then we know current packet is a DNS query packet:
-            # (1) 
+            # (1) UDP packet with destination port 53
+            # (2) has exactly one DNS question entry
+            # The query type of the entry is either A or AAAA (QTYPE == 1 or QTYPE == 28)
+            # QCLASS == 1
+            
+            # Grab question count in DNS header
+            question_count_offset = byte_offset + 12
+            question_count = struct.unpack('!H', pkt[question_count_offset:(question_count_offset + 2)])[0]
+
+            # Now we find the beginning of the QNAME field
+            q_name_offset = question_count_offset + 8
+
+            # Use q_name_offset to find the beginning of the q_type field
+            q_type_offset = q_name_offset
+            
+            while ord(pkt[q_type_offset:(q_type_offset + 1)]) is not 0:
+                q_type_offset += 1
+            q_type_offset += 1
+
+            # At this point, q_type_offset is set correctly
+            # Unpack q_type_offset
+            q_type = struct.unpack('!H', pkt[q_type_offset:(q_type_offset + 2)])[0]
+            
+            # Grab q_class and unpack it
+            q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
+       
+            # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
+            if ((destination_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
+                print("We have found a DNS query packet!")
 
         elif (packet_protocol_number == 6):
             # TCP
