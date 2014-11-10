@@ -23,16 +23,14 @@ class Firewall:
         # Initialize geo_id map, given the geo_id text file
         self.geo_id_map = self.initialize_geo_id_file("geoipdb.txt")
 
-        # Initialize DNS maps, given the rules file
-        self.exact_dns_map = {}
-        self.wild_card_dns_map = {}
-
-        
+        # Initialize DNS data structure, given the rules file
+        # Entries are nested tuples in a list (we need to maintain ordering) that look like:
+        # (current_domain , ("WILDCARD"/"EXACT", "PASS"/"DROP"))
+        self.dns_rules_list = []
 
         self.initialize_all_maps(self.rules_file)
 
-        print(self.exact_dns_map)
-        print(self.wild_card_dns_map)
+        print(self.dns_rules_list)
 
         # TODO: Initialize TCP, UDP, ICMP data structures  
 
@@ -58,17 +56,17 @@ class Firewall:
                # Entries look like: <current_domain, T/F>
                if (split_line[2].startswith("*")):
                    if (current_verdict == "PASS"):
-                       self.wild_card_dns_map[current_domain[1:]] = True
+                       self.dns_rules_list.append((current_domain[1:], ("WILDCARD", "PASS")))
                    # current verdict is DROP, so we set value to False
                    else:
-                       self.wild_card_dns_map[current_domain[1:]] = False
+                       self.dns_rules_list.append((current_domain[1:], ("WILDCARD", "DROP")))
                # Exact match
                else:
                    if (current_verdict == "PASS"):
-                       self.exact_dns_map[current_domain] = True
+                       self.dns_rules_list.append((current_domain, ("EXACT", "PASS")))
                    # Current verdict is DROP, so we set value to False
                    else:
-                       self.exact_dns_map[current_domain] = False
+                       self.dns_rules_list.append((current_domain, ("EXACT", "DROP")))
 
             elif (current_protocol == "TCP"):
                 continue
