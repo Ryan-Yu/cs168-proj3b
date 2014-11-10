@@ -11,21 +11,21 @@ import time
 # You must not use any 3rd-party libraries, though.
 
 class TCPRule:
-    def __init__(self, country_code=None, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict):
+    def __init__(self, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict, country_code=None):
         self.ip_range = (ip_lower_bound, ip_upper_bound)
         self.verdict = verdict
         self.port_range = (port_lower_bound, port_upper_bound)
         self.country_code = country_code
 
 class UDPRule:
-    def __init__(self, country_code=None, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict):
+    def __init__(self, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict, country_code=None):
         self.ip_range = (ip_lower_bound, ip_upper_bound)
         self.verdict = verdict
         self.port_range = (port_lower_bound, port_upper_bound)
         self.country_code = country_code
 
 class ICMPRule:
-    def __init__(self, country_code=None, ip_lower_bound, ip_upper_bound, icmp_type, verdict):
+    def __init__(self, ip_lower_bound, ip_upper_bound, icmp_type, verdict, country_code=None):
         self.ip_range = (ip_lower_bound, ip_upper_bound)
         self.verdict = verdict
         self.icmp_type = icmp_type
@@ -267,7 +267,7 @@ class Firewall:
     i.e. (1.1.1.1/24) -> (1.1.1.0, 1.1.1.255)
     '''
     def convert_slash_notation_to_ip_range(ip_slash_notation):
-
+        pass
     # TODO: You can add more methods as you want.
 
 # TODO: You may want to add more classes/functions as well.
