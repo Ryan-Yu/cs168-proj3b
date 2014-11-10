@@ -114,7 +114,8 @@ class Firewall:
         byte_offset = ip_header_length * 4
 
         packet_protocol_number = ord(pkt[9:10])
-        
+
+        ######################################### 
         # UDP case
         if (packet_protocol_number == 17):
             # If UDP, then source port is given by [20:22] and dst port given by [22:24]
@@ -189,37 +190,25 @@ class Firewall:
             else:
                 pass
 
+        #######################################
 
         elif (packet_protocol_number == 6):
             # TCP
             pass
 
+        #######################################
+
         elif (packet_protocol_number == 1):
             # ICMP
             pass
 
-        # We encounter a DNS query packet
-        if (1 == 1):
-            pass
-        # IP packet
-        else:
-            pass
-
+        # Send all packets that aren't marked for drop
         if pkt_dir == PKT_DIR_INCOMING:
             self.iface_int.send_ip_packet(pkt)
         elif pkt_dir == PKT_DIR_OUTGOING:
             self.iface_ext.send_ip_packet(pkt)
         
-
-
         print("src_ip: " + src_ip + "; dst_ip: " + dst_ip)
-
-        # PKT_DIR_INCOMING: The packet has been received from the ext interface. You
-        # need to call self.iface_int.send_ip_packet() to pass this packet.
-        # PKT_DIR_OUTGOING: The packet has been received from the int interface. You
-        # need to call self.iface_ext.send_ip_packet() to pass this packet.
-        
-        # To drop the packet, simply omit the call to .send_ip_packet()
 
     '''
     Returns true if the DNS packet that is requesting the domain 'domain_name'
@@ -246,7 +235,6 @@ class Firewall:
                         pass_packet_through = False
                     elif (verdict == "PASS"):
                         pass_packet_through = True
-
                 
         return pass_packet_through
 
