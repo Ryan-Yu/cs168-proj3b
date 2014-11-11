@@ -24,6 +24,14 @@ class UDPRule:
         self.port_range = (port_lower_bound, port_upper_bound)
         self.country_code = country_code
 
+    def __str__(self):
+        string_representation = "\nUDP RULE --\n"
+        string_representation += "Verdict: %s\n" % self.verdict
+        string_representation += "IP Range: %s\n" % (self.ip_range,)
+        string_representation += "Port Range: %s\n" % (self.port_range,)
+        string_representation += "Country Code: %s\n" % self.country_code
+        return string_representation
+
 class ICMPRule:
     def __init__(self, ip_lower_bound, ip_upper_bound, icmp_type, verdict, country_code=None):
         self.ip_range = (ip_lower_bound, ip_upper_bound)
@@ -59,7 +67,6 @@ class Firewall:
 
         ########## End of initialization of rules lists ##########
 
-        print(self.dns_rules_list)
 
         # TODO: Initialize TCP, UDP, ICMP data structures  
 
@@ -76,8 +83,7 @@ class Firewall:
             current_verdict = split_line[0].upper()
             current_protocol = split_line[1].upper()
            
-            # Handle DNS rule
-            # Example: pass dns google.com
+            ########## Handle DNS rule ##########
             if (current_protocol == "DNS"):
 
                current_domain = split_line[2] 
@@ -98,11 +104,61 @@ class Firewall:
                    else:
                        self.dns_rules_list.append((current_domain, ("EXACT", "DROP")))
 
+            ########## Handle TCP rule ##########
             elif (current_protocol == "TCP"):
                 continue
-            # Handle UDP rule
+
+            ########## Handle UDP rule ##########
             elif (current_protocol == "UDP"):
-                continue
+                ip = split_line[2]
+                port = split_line[3]
+                
+                # The arguments that will be used in the constructor
+                declared_country_code = None
+                declared_ip_lower_bound = ""
+                declared_ip_upper_bound = ""
+                declared_port_lower_bound = float("inf")
+                declared_port_upper_bound = float("inf")
+
+                # Initialize IP range
+                
+                if (ip == "any"):
+                    declared_ip_lower_bound = "any"
+                    declared_ip_upper_bound = "any"
+                # IP is country code
+                elif (len(ip) == 2):
+                    declared_country_code = ip.upper()
+                    declared_ip_lower_bound = "country"
+                    declared_ip_upper_bound = "country"
+                # IP is in CIDR notation
+                elif ("/" in ip):
+                    ip_range = self.convert_slash_notation_to_ip_range(ip)
+                    declared_ip_lower_bound = ip_range[0]
+                    declared_ip_upper_bound = ip_range[1]
+
+                # IP is a singular IP address
+                else:
+                    declared_ip_lower_bound = ip
+                    declared_ip_upper_bound = ip
+
+                # Initialize port range
+                
+                if (port == "any"):
+                    declared_port_lower_bound = "any"
+                    declared_port_upper_bound = "any"
+                elif ("-" in port):
+                    split_port_range = port.split('-')
+                    declared_port_lower_bound = split_port_range[0]
+                    declared_port_upper_bound = split_port_range[1]
+                else:
+                    declared_port_lower_bound = port
+                    declared_port_upper_bound = port
+                
+                # Initialize new UDP rule and append it to our UDP rules list
+                new_udp_rule = UDPRule(declared_ip_lower_bound, declared_ip_upper_bound, declared_port_lower_bound, declared_port_upper_bound, current_verdict, declared_country_code)
+                self.udp_rules_list.append(new_udp_rule)
+
+            ########## Handle ICMP rule ##########
             elif (current_protocol == "ICMP"):
                 continue
 
