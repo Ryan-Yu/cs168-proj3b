@@ -44,12 +44,20 @@ class Firewall:
         # Initialize geo_id map, given the geo_id text file
         self.geo_id_map = self.initialize_geo_id_file("geoipdb.txt")
 
-        # Initialize DNS data structure, given the rules file
+
+        ########## Initialization of rules lists ##########
+
+        # Initialize DNS rules list
         # Entries are nested tuples in a list (we need to maintain ordering) that look like:
         # (current_domain , ("WILDCARD"/"EXACT", "PASS"/"DROP"))
         self.dns_rules_list = []
 
+        # Initialize regular UDP rules list
+        self.udp_rules_list = []
+
         self.initialize_all_maps(self.rules_file)
+
+        ########## End of initialization of rules lists ##########
 
         print(self.dns_rules_list)
 
@@ -69,6 +77,7 @@ class Firewall:
             current_protocol = split_line[1].upper()
            
             # Handle DNS rule
+            # Example: pass dns google.com
             if (current_protocol == "DNS"):
 
                current_domain = split_line[2] 
@@ -91,6 +100,7 @@ class Firewall:
 
             elif (current_protocol == "TCP"):
                 continue
+            # Handle UDP rule
             elif (current_protocol == "UDP"):
                 continue
             elif (current_protocol == "ICMP"):
@@ -266,8 +276,84 @@ class Firewall:
 
     i.e. (1.1.1.1/24) -> (1.1.1.0, 1.1.1.255)
     '''
-    def convert_slash_notation_to_ip_range(ip_slash_notation):
-        pass
-    # TODO: You can add more methods as you want.
+    def convert_slash_notation_to_ip_range(self, ip_slash_notation):
+        lower_bound_to_return = ""
+        upper_bound_to_return = ""
+        
+        ip_split = ip_slash_notation.split('/')
+        ip_address = ip_split[0]
+        subnet_mask = int(ip_split[1])
 
-# TODO: You may want to add more classes/functions as well.
+        # Split ip_address (1.1.1.1) into its four components
+        split_ip_address = ip_address.split('.')
+
+        # Will be a length 32 bit array that represents the IP address (unmodified)
+        resultant_bit_array = []
+
+        for component in split_ip_address:
+            parsed_component = int(component)
+            # Convert each component into array of 1's and 0's
+            # For example, '1' gets translated to [0, b, 1], where all elements are strings.
+            # We cut off indexes 0 and 1 to get rid of the '0' and 'b'
+            component_bit_array = bin(parsed_component)[2:]
+
+            # Since each component is represented by 8 bits, we must pad our resultant_bit_array with 0s
+            # if our component value doesn't fill all 8 bits
+            number_of_zeros_to_pad = 8 - len(component_bit_array)
+            while (number_of_zeros_to_pad > 0):
+                resultant_bit_array.append(0)
+                number_of_zeros_to_pad -= 1
+    
+            for string_bit in component_bit_array:
+                resultant_bit_array.append(int(string_bit))
+       
+        # At this point, resultant_bit_array is a length 32 array with all 0's and 1's (integers)
+        # It represents the binary representation of our ip address
+       
+        # Create two length 32 arrays that represent the lower and upper bounds of our range, given the subnet mask
+        lower_bound_bit_array = []
+        upper_bound_bit_array = []
+        for i in range(32):
+            # If we're past the subnet mask boundary, fill the lower bound with 0 and the upper bound with 1
+            if (i >= subnet_mask):
+                lower_bound_bit_array.append(0)
+                upper_bound_bit_array.append(1)
+            # If we're still to the left of the boundary, just copy the same value over
+            else:
+                lower_bound_bit_array.append(resultant_bit_array[i])
+                upper_bound_bit_array.append(resultant_bit_array[i])
+
+        # Generate two length 4 arrays that represent the (decimal) components of our lower and upper IP bounds
+        lower_bound_decimal_components = []
+        upper_bound_decimal_components = []
+        
+        lower_bound_decimal_components.append(self.translate_binary_array_into_decimal(lower_bound_bit_array[:8]))
+        upper_bound_decimal_components.append(self.translate_binary_array_into_decimal(upper_bound_bit_array[:8]))
+        lower_bound_decimal_components.append(self.translate_binary_array_into_decimal(lower_bound_bit_array[8:16]))
+        upper_bound_decimal_components.append(self.translate_binary_array_into_decimal(upper_bound_bit_array[8:16]))
+        lower_bound_decimal_components.append(self.translate_binary_array_into_decimal(lower_bound_bit_array[16:24]))
+        upper_bound_decimal_components.append(self.translate_binary_array_into_decimal(upper_bound_bit_array[16:24]))
+        lower_bound_decimal_components.append(self.translate_binary_array_into_decimal(lower_bound_bit_array[24:32]))
+        upper_bound_decimal_components.append(self.translate_binary_array_into_decimal(upper_bound_bit_array[24:32]))
+
+        # Generate a lower_bound string and an upper_bound string from our integer components above, and return!
+        for i in range(4):
+            lower_bound_to_return += str(lower_bound_decimal_components[i])
+            upper_bound_to_return += str(upper_bound_decimal_components[i])
+            if (i != 3):
+                lower_bound_to_return += "."
+                upper_bound_to_return += "."
+            
+        return (lower_bound_to_return, upper_bound_to_return)
+
+
+    '''
+    Translates a binary array of integers (i.e. [1, 1, 1, 1, 1, 1, 1, 1])
+    into its decimal equivalent (i.e. 255)
+    '''
+    def translate_binary_array_into_decimal(self, binary_array):
+        output = 0
+        for bit in binary_array:
+            output = (output << 1) | bit
+        return output
+
