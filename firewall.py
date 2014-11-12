@@ -6,7 +6,7 @@ import socket
 import struct
 import time
 
-# TODO: Feel free to import any Python standard moduless as necessary.
+# Feel free to import any Python standard modules as necessary.
 # (http://docs.python.org/2/library/)
 # You must not use any 3rd-party libraries, though.
 
@@ -25,6 +25,7 @@ class TCPRule:
         string_representation += "Country Code: %s\n" % self.country_code
         return string_representation
 
+
 class UDPRule:
     def __init__(self, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict, country_code=None):
         self.ip_range = (ip_lower_bound, ip_upper_bound)
@@ -39,6 +40,7 @@ class UDPRule:
         string_representation += "Port Range: %s\n" % (self.port_range,)
         string_representation += "Country Code: %s\n" % self.country_code
         return string_representation
+
 
 class ICMPRule:
     def __init__(self, ip_lower_bound, ip_upper_bound, icmp_type, verdict, country_code=None):
@@ -55,6 +57,7 @@ class ICMPRule:
         string_representation += "Country Code: %s\n" % self.country_code
         return string_representation
 
+
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
@@ -63,7 +66,7 @@ class Firewall:
         self.rules_file = config['rule']
         # Initialize geo_id map, given the geo_id text file
         self.geo_id_map = self.initialize_geo_id_file("geoipdb.txt")
-
+        print(self.geo_id_map['US'])
         ########## Initialization of rules lists ##########
 
         # Initialize DNS rules list
@@ -91,7 +94,7 @@ class Firewall:
 
     def initialize_all_maps(self, rules_file):
        
-        # TODO: Account for blank lines and lines with comments
+        # TODO: Still need to ignore blank lines and lines with comments
         rules = open(rules_file)
         
         # Iterate through each rule in rules file, handling different types of rules separately
@@ -282,7 +285,6 @@ class Firewall:
     # @pkt_dir: either PKT_DIR_INCOMING or PKT_DIR_OUTGOING
     # @pkt: Python string that contains the actual data of the IPv4 packet (including IP header)
     def handle_packet(self, pkt_dir, pkt):
-        # TODO: Your main firewall code will be here.
         # Whenever a packet is captured, this handler will be invoked. 
         
         src_ip = socket.inet_ntoa(pkt[12:16])
@@ -340,24 +342,17 @@ class Firewall:
             q_type_offset += 1
             q_name = q_name[:(len(q_name) - 1)]
 
-            print("our domain name is: " + q_name)
-
             # At this point, q_name represents the URL that was requested, as a String
             
             # At this point, q_type_offset is set correctly
             # Unpack q_type_offset
             q_type = struct.unpack('!H', pkt[q_type_offset:(q_type_offset + 2)])[0]
            
-            print("q_type: " + str(q_type))
-
             # Grab q_class and unpack it
             q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
         
-            
-
             # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
             if ((destination_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
-                print("About to make decision on packet with name: " + q_name)
                 send_packet = self.make_decision_on_dns_packet(pkt, q_name)
                 if send_packet:
                     if pkt_dir == PKT_DIR_INCOMING:
@@ -365,23 +360,24 @@ class Firewall:
                     elif pkt_dir == PKT_DIR_OUTGOING:
                         self.iface_ext.send_ip_packet(pkt)
                 else:
-                    print("We've dropped a packet.")
+                    # We've dropped our packet, so just return
                     return
 
             # Current packet is a REGULAR UDP packet
             else:
+                # TODO: Look at UDP rules list and determine whether UDP packet should be dropped
                 pass
 
         #######################################
 
         elif (packet_protocol_number == 6):
-            # TCP
+            # TODO: Look at TCP rules list and determine whether TCP packet should be dropped
             pass
 
         #######################################
 
         elif (packet_protocol_number == 1):
-            # ICMP
+            # TODO: Look at ICMP rules list and determine whether ICMP packet should be dropped
             pass
 
         # Send all packets that aren't marked for drop
@@ -390,7 +386,6 @@ class Firewall:
         elif pkt_dir == PKT_DIR_OUTGOING:
             self.iface_ext.send_ip_packet(pkt)
         
-        print("src_ip: " + src_ip + "; dst_ip: " + dst_ip)
 
 
     '''
@@ -496,8 +491,6 @@ class Firewall:
         upper_bound_in_decimal = self.translate_binary_array_into_decimal(upper_bound_bit_array)
         ip_address_in_decimal = self.translate_binary_array_into_decimal(ip_address_bit_array)
 
-        print("Lower bound: %s; upper bound: %s; ip address: %s" % (lower_bound_in_decimal, upper_bound_in_decimal, ip_address_in_decimal))
-
         return (ip_address_in_decimal <= upper_bound_in_decimal) and (ip_address_in_decimal >= lower_bound_in_decimal)
 
 
@@ -544,5 +537,38 @@ class Firewall:
         for bit in binary_array:
             output = (output << 1) | bit
         return output
+
+
+    '''
+    Given an ip address, converts the IP address into the integer representation of the 32 bits in the IP address.
+    This is used for comparing whether one IP address is "larger" or "smaller" than another IP address
+    '''
+    def translate_ip_address_into_integer(self, ip_address):
+        ip_address_as_binary_array = self.break_ip_address_into_binary_array(ip_address)
+        return self.translate_binary_array_into_decimal(ip_address_as_binary_array)
+
+
+    '''
+    Given a list of IP range tuples in ascending sorted order, binary searches the list to see of any of the ranges contain the 'ip_address'
+    
+    Returns true if the 'ip_address' is contained within ANY of the ranges in the list_of_ip_ranges
+    '''
+    def binary_search_list_of_ip_ranges(list_of_ip_ranges, ip_address):
+        low = 0
+        high = len(list_of_ip_ranges) - 1
+        while (low <= high):
+            middle = (low + high) / 2
+            middle_ip_range = list_of_ip_ranges[middle]
+            # ip_address is contained within the current ip range, so return True
+            if self.is_ip_contained_within_range(middle_ip_range[0], middle_ip_range[1], ip_address):
+                return True
+            # Look on left side of middle index
+            if self.translate_ip_address_into_integer(ip_address) < self.translate_ip_address_into_integer(middle_ip_range[0]):
+                high = middle - 1
+            # Look on right side of middle index
+            if self.translate_ip_address_into_integer(ip_address) > self.translate_ip_address_into_integer(middle_ip_range[1]):
+                low = middle + 1
+        return False
+            
 
 
