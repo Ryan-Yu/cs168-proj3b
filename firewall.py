@@ -17,6 +17,14 @@ class TCPRule:
         self.port_range = (port_lower_bound, port_upper_bound)
         self.country_code = country_code
 
+    def __str__(self):
+        string_representation = "\nTCP RULE --\n"
+        string_representation += "Verdict: %s\n" % self.verdict
+        string_representation += "IP Range: %s\n" % (self.ip_range,)
+        string_representation += "Port Range: %s\n" % (self.port_range,)
+        string_representation += "Country Code: %s\n" % self.country_code
+        return string_representation
+
 class UDPRule:
     def __init__(self, ip_lower_bound, ip_upper_bound, port_lower_bound, port_upper_bound, verdict, country_code=None):
         self.ip_range = (ip_lower_bound, ip_upper_bound)
@@ -39,19 +47,22 @@ class ICMPRule:
         self.icmp_type = icmp_type
         self.country_code = country_code
 
+    def __str__(self):
+        string_representation = "\nICMP RULE --\n"
+        string_representation += "Verdict: %s\n" % self.verdict
+        string_representation += "IP Range: %s\n" % (self.ip_range,)
+        string_representation += "ICMP Type: %s\n" % self.icmp_type
+        string_representation += "Country Code: %s\n" % self.country_code
+        return string_representation
+
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
         self.iface_ext = iface_ext
 
-        # TODO: Load the firewall rules (from rule_filename) here.
-        print 'I am supposed to load rules from %s, but I am feeling lazy.' % \
-                config['rule']
-
         self.rules_file = config['rule']
         # Initialize geo_id map, given the geo_id text file
         self.geo_id_map = self.initialize_geo_id_file("geoipdb.txt")
-
 
         ########## Initialization of rules lists ##########
 
@@ -60,19 +71,27 @@ class Firewall:
         # (current_domain , ("WILDCARD"/"EXACT", "PASS"/"DROP"))
         self.dns_rules_list = []
 
-        # Initialize regular UDP rules list
+        # Initialize regular UDP rules list, TCP rules list, and ICMP rules list
         self.udp_rules_list = []
+        self.tcp_rules_list = []
+        self.icmp_rules_list = []
 
         self.initialize_all_maps(self.rules_file)
 
         ########## End of initialization of rules lists ##########
+        for udp_rule in self.udp_rules_list:
+            print(udp_rule)
 
+        for tcp_rule in self.tcp_rules_list:
+            print(tcp_rule)
 
-        # TODO: Initialize TCP, UDP, ICMP data structures  
+        for icmp_rule in self.icmp_rules_list:
+            print(icmp_rule)
 
 
     def initialize_all_maps(self, rules_file):
-        
+       
+        # TODO: Account for blank lines and lines with comments
         rules = open(rules_file)
         
         # Iterate through each rule in rules file, handling different types of rules separately
@@ -106,10 +125,6 @@ class Firewall:
 
             ########## Handle TCP rule ##########
             elif (current_protocol == "TCP"):
-                continue
-
-            ########## Handle UDP rule ##########
-            elif (current_protocol == "UDP"):
                 ip = split_line[2]
                 port = split_line[3]
                 
@@ -117,14 +132,14 @@ class Firewall:
                 declared_country_code = None
                 declared_ip_lower_bound = ""
                 declared_ip_upper_bound = ""
-                declared_port_lower_bound = float("inf")
+                declared_port_lower_bound = float("-inf")
                 declared_port_upper_bound = float("inf")
 
                 # Initialize IP range
                 
                 if (ip == "any"):
-                    declared_ip_lower_bound = "any"
-                    declared_ip_upper_bound = "any"
+                    declared_ip_lower_bound = "0.0.0.0"
+                    declared_ip_upper_bound = "255.255.255.255"
                 # IP is country code
                 elif (len(ip) == 2):
                     declared_country_code = ip.upper()
@@ -144,8 +159,56 @@ class Firewall:
                 # Initialize port range
                 
                 if (port == "any"):
-                    declared_port_lower_bound = "any"
-                    declared_port_upper_bound = "any"
+                    pass
+                elif ("-" in port):
+                    split_port_range = port.split('-')
+                    declared_port_lower_bound = split_port_range[0]
+                    declared_port_upper_bound = split_port_range[1]
+                else:
+                    declared_port_lower_bound = port
+                    declared_port_upper_bound = port
+                
+                # Initialize new TCP rule and append it to our TCP rules list
+                new_tcp_rule = TCPRule(declared_ip_lower_bound, declared_ip_upper_bound, declared_port_lower_bound, declared_port_upper_bound, current_verdict, declared_country_code)
+                self.tcp_rules_list.append(new_tcp_rule)
+
+            ########## Handle UDP rule ##########
+            elif (current_protocol == "UDP"):
+                ip = split_line[2]
+                port = split_line[3]
+                
+                # The arguments that will be used in the constructor
+                declared_country_code = None
+                declared_ip_lower_bound = ""
+                declared_ip_upper_bound = ""
+                declared_port_lower_bound = float("-inf")
+                declared_port_upper_bound = float("inf")
+
+                # Initialize IP range
+                
+                if (ip == "any"):
+                    declared_ip_lower_bound = "0.0.0.0"
+                    declared_ip_upper_bound = "255.255.255.255"
+                # IP is country code
+                elif (len(ip) == 2):
+                    declared_country_code = ip.upper()
+                    declared_ip_lower_bound = "country"
+                    declared_ip_upper_bound = "country"
+                # IP is in CIDR notation
+                elif ("/" in ip):
+                    ip_range = self.convert_slash_notation_to_ip_range(ip)
+                    declared_ip_lower_bound = ip_range[0]
+                    declared_ip_upper_bound = ip_range[1]
+
+                # IP is a singular IP address
+                else:
+                    declared_ip_lower_bound = ip
+                    declared_ip_upper_bound = ip
+
+                # Initialize port range
+                
+                if (port == "any"):
+                    pass
                 elif ("-" in port):
                     split_port_range = port.split('-')
                     declared_port_lower_bound = split_port_range[0]
@@ -160,7 +223,39 @@ class Firewall:
 
             ########## Handle ICMP rule ##########
             elif (current_protocol == "ICMP"):
-                continue
+                ip = split_line[2]
+                icmp_type = split_line[3]
+                
+                # The arguments that will be used in the constructor
+                declared_country_code = None
+                declared_ip_lower_bound = ""
+                declared_ip_upper_bound = ""
+
+                # Initialize IP range
+                
+                if (ip == "any"):
+                    declared_ip_lower_bound = "0.0.0.0"
+                    declared_ip_upper_bound = "255.255.255.255"
+                # IP is country code
+                elif (len(ip) == 2):
+                    declared_country_code = ip.upper()
+                    declared_ip_lower_bound = "country"
+                    declared_ip_upper_bound = "country"
+                # IP is in CIDR notation
+                elif ("/" in ip):
+                    ip_range = self.convert_slash_notation_to_ip_range(ip)
+                    declared_ip_lower_bound = ip_range[0]
+                    declared_ip_upper_bound = ip_range[1]
+
+                # IP is a singular IP address
+                else:
+                    declared_ip_lower_bound = ip
+                    declared_ip_upper_bound = ip
+
+                # Initialize new ICMP rule and append it to our ICMP rules list
+                new_icmp_rule = ICMPRule(declared_ip_lower_bound, declared_ip_upper_bound, icmp_type, current_verdict, declared_country_code)
+                self.icmp_rules_list.append(new_icmp_rule)
+
 
 
     '''
@@ -343,26 +438,9 @@ class Firewall:
         # Split ip_address (1.1.1.1) into its four components
         split_ip_address = ip_address.split('.')
 
-        # Will be a length 32 bit array that represents the IP address (unmodified)
-        resultant_bit_array = []
+        # Generate a length 32 integer array that represents the binary representation of the ip address
+        resultant_bit_array = self.break_ip_address_into_binary_array(ip_address)
 
-        for component in split_ip_address:
-            parsed_component = int(component)
-            # Convert each component into array of 1's and 0's
-            # For example, '1' gets translated to [0, b, 1], where all elements are strings.
-            # We cut off indexes 0 and 1 to get rid of the '0' and 'b'
-            component_bit_array = bin(parsed_component)[2:]
-
-            # Since each component is represented by 8 bits, we must pad our resultant_bit_array with 0s
-            # if our component value doesn't fill all 8 bits
-            number_of_zeros_to_pad = 8 - len(component_bit_array)
-            while (number_of_zeros_to_pad > 0):
-                resultant_bit_array.append(0)
-                number_of_zeros_to_pad -= 1
-    
-            for string_bit in component_bit_array:
-                resultant_bit_array.append(int(string_bit))
-       
         # At this point, resultant_bit_array is a length 32 array with all 0's and 1's (integers)
         # It represents the binary representation of our ip address
        
@@ -404,6 +482,60 @@ class Firewall:
 
 
     '''
+    Given two IP addresses that represent the lower bound and upper bound of an IP range,
+    returns (T/F) whether a third IP address (i.e. 'ip_address') is contained within the range of the lower and upper bound addresses.
+
+    Containment is inclusive; i.e. 2.2.2.2 is indeed contained within the range (2.2.2.2, 2.2.2.3)
+    '''
+    def is_ip_contained_within_range(self, range_lower_bound, range_upper_bound, ip_address):
+        lower_bound_bit_array = self.break_ip_address_into_binary_array(range_lower_bound)
+        upper_bound_bit_array = self.break_ip_address_into_binary_array(range_upper_bound)
+        ip_address_bit_array = self.break_ip_address_into_binary_array(ip_address)
+
+        lower_bound_in_decimal = self.translate_binary_array_into_decimal(lower_bound_bit_array)
+        upper_bound_in_decimal = self.translate_binary_array_into_decimal(upper_bound_bit_array)
+        ip_address_in_decimal = self.translate_binary_array_into_decimal(ip_address_bit_array)
+
+        print("Lower bound: %s; upper bound: %s; ip address: %s" % (lower_bound_in_decimal, upper_bound_in_decimal, ip_address_in_decimal))
+
+        return (ip_address_in_decimal <= upper_bound_in_decimal) and (ip_address_in_decimal >= lower_bound_in_decimal)
+
+
+    '''
+    Given a ip_address represented as a String in dotted quad notation (i.e. 1.1.1.1),
+    returns a length 32 integer array that represents the binary representation of the ip address)
+
+    i.e. 1.1.1.1 returns
+    [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1]
+    '''
+    def break_ip_address_into_binary_array(self, ip_address):
+        # Split ip_address (1.1.1.1) into its four components
+        split_ip_address = ip_address.split('.')
+
+        # Will be a length 32 bit array that represents the IP address
+        resultant_bit_array = []
+
+        for component in split_ip_address:
+            parsed_component = int(component)
+            # Convert each component into array of 1's and 0's
+            # For example, '1' gets translated to [0, b, 1], where all elements are strings.
+            # We cut off indexes 0 and 1 to get rid of the '0' and 'b'
+            component_bit_array = bin(parsed_component)[2:]
+
+            # Since each component is represented by 8 bits, we must pad our resultant_bit_array with 0s
+            # if our component value doesn't fill all 8 bits
+            number_of_zeros_to_pad = 8 - len(component_bit_array)
+            while (number_of_zeros_to_pad > 0):
+                resultant_bit_array.append(0)
+                number_of_zeros_to_pad -= 1
+    
+            for string_bit in component_bit_array:
+                resultant_bit_array.append(int(string_bit))
+        
+        return resultant_bit_array
+
+
+    '''
     Translates a binary array of integers (i.e. [1, 1, 1, 1, 1, 1, 1, 1])
     into its decimal equivalent (i.e. 255)
     '''
@@ -412,4 +544,5 @@ class Firewall:
         for bit in binary_array:
             output = (output << 1) | bit
         return output
+
 
