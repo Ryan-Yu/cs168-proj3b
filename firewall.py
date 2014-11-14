@@ -365,7 +365,7 @@ class Firewall:
 
             # Current packet is a REGULAR UDP packet
             else:
-                # TODO: Look at UDP rules list and determine whether UDP packet should be dropped
+                # Look at UDP rules list and determine whether UDP packet should be dropped
                 
                 # Destination ip address given by 'dst_ip'; destination port given by 'destination_port'
                 send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port)                
@@ -374,10 +374,10 @@ class Firewall:
                         self.iface_int.send_ip_packet(pkt)
                     elif pkt_dir == PKT_DIR_OUTGOING:
                         self.iface_ext.send_ip_packet(pkt)
-                    print("SENT PACKET")
+                    print("SENT UDP PACKET")
                 else:
                     # We've dropped our packet, so just return
-                    print("DROPPED PACKET")
+                    print("DROPPED UDP PACKET")
                     return
 
 
@@ -385,22 +385,135 @@ class Firewall:
         #######################################
 
         elif (packet_protocol_number == 6):
-            # TODO: Look at TCP rules list and determine whether TCP packet should be dropped
-            pass
+            # Look at TCP rules list and determine whether TCP packet should be dropped
+            
+            # pkt[byte_offset:(byte_offset + 2)] returns String representing source port
+            # struct.unpack then unpacks this String as a short, and returns it as a tuple with a blank second item
+            source_port = struct.unpack('!H', pkt[byte_offset:(byte_offset + 2)])[0]
+            destination_port = struct.unpack('!H', pkt[(byte_offset + 2):(byte_offset + 4)])[0]
+           
+            send_packet = self.make_decision_on_tcp_packet(dst_ip, destination_port)                
+            if send_packet:
+                if pkt_dir == PKT_DIR_INCOMING:
+                    self.iface_int.send_ip_packet(pkt)
+                elif pkt_dir == PKT_DIR_OUTGOING:
+                    self.iface_ext.send_ip_packet(pkt)
+                print("SENT TCP PACKET")
+            else:
+                # We've dropped our packet, so just return
+                print("DROPPED TCP PACKET")
+                return
+
 
         #######################################
 
         elif (packet_protocol_number == 1):
-            # TODO: Look at ICMP rules list and determine whether ICMP packet should be dropped
-            pass
+            # Look at ICMP rules list and determine whether ICMP packet should be dropped
+            
+            # Parse ICMP type from the packet
+            icmp_type = ord(pkt[byte_offset:(byte_offset + 1)])
+            send_packet = self.make_decision_on_icmp_packet(dst_ip, icmp_type)                
+            if send_packet:
+                if pkt_dir == PKT_DIR_INCOMING:
+                    self.iface_int.send_ip_packet(pkt)
+                elif pkt_dir == PKT_DIR_OUTGOING:
+                    self.iface_ext.send_ip_packet(pkt)
+                print("SENT ICMP PACKET")
+            else:
+                # We've dropped our packet, so just return
+                print("DROPPED ICMP PACKET")
+                return
 
-        # Send all packets that aren't marked for drop
-        if pkt_dir == PKT_DIR_INCOMING:
-            self.iface_int.send_ip_packet(pkt)
-        elif pkt_dir == PKT_DIR_OUTGOING:
-            self.iface_ext.send_ip_packet(pkt)
+
+        else:
+            # Send all packets that aren't marked for drop
+            if pkt_dir == PKT_DIR_INCOMING:
+                self.iface_int.send_ip_packet(pkt)
+            elif pkt_dir == PKT_DIR_OUTGOING:
+                self.iface_ext.send_ip_packet(pkt)
         
 
+    '''
+    Returns true if the ICMP packet with destination_ip and icmp_type should be passed, and false if it should be dropped
+    '''
+    def make_decision_on_icmp_packet(self, destination_ip, icmp_type):
+        
+        pass_packet_through = True
+        for icmp_rule in self.icmp_rules_list:
+            icmp_rule_satisfied = False
+            ip_rule_satisfied = False
+
+            icmp_type_rule = int(icmp_rule.icmp_type)
+
+            # if our packet's destination port lies within the rule's port range
+            if (icmp_type_rule == icmp_type): 
+                icmp_rule_satisfied = True
+
+            # Our IP rule is a country code
+            if icmp_rule.country_code is not None:
+                list_of_ip_ranges_for_country = self.geo_id_map[icmp_rule.country_code]
+
+                if self.binary_search_list_of_ip_ranges(list_of_ip_ranges_for_country, destination_ip):
+                    ip_rule_satisfied = True
+
+            # Our IP rule is an IP range
+            else:
+                ip_range = icmp_rule.ip_range
+                if self.is_ip_contained_within_range(ip_range[0], ip_range[1], destination_ip):
+                    ip_rule_satisfied = True
+
+            # Depending on the verdict and whether our port/ip rules are satisfied, we decide whether to pass/drop the packet
+            if (icmp_rule_satisfied and ip_rule_satisfied):
+                if (icmp_rule.verdict == "PASS"):
+                    pass_packet_through = True
+                elif (icmp_rule.verdict == "DROP"):
+                    pass_packet_through = False
+
+        return pass_packet_through 
+
+
+
+    '''
+    Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
+    '''
+    def make_decision_on_tcp_packet(self, destination_ip, destination_port):
+        
+        pass_packet_through = True
+        for tcp_rule in self.tcp_rules_list:
+            port_rule_satisfied = False
+            ip_rule_satisfied = False
+
+            port_range = tcp_rule.port_range
+
+            # if our packet's destination port lies within the rule's port range
+            if (port_range[1] == float("inf") and port_range[0] == float("-inf")):
+                port_rule_satisfied = True
+            elif ((destination_port <= int(port_range[1])) and (destination_port >= int(port_range[0]))):
+                port_rule_satisfied = True
+
+            # Our IP rule is a country code
+            if tcp_rule.country_code is not None:
+                list_of_ip_ranges_for_country = self.geo_id_map[tcp_rule.country_code]
+
+                if self.binary_search_list_of_ip_ranges(list_of_ip_ranges_for_country, destination_ip):
+                    ip_rule_satisfied = True
+
+            # Our IP rule is an IP range
+            else:
+                ip_range = tcp_rule.ip_range
+                if self.is_ip_contained_within_range(ip_range[0], ip_range[1], destination_ip):
+                    ip_rule_satisfied = True
+
+            # Depending on the verdict and whether our port/ip rules are satisfied, we decide whether to pass/drop the packet
+            if (port_rule_satisfied and ip_rule_satisfied):
+                if (tcp_rule.verdict == "PASS"):
+                    pass_packet_through = True
+                elif (tcp_rule.verdict == "DROP"):
+                    pass_packet_through = False
+
+        return pass_packet_through 
+    
+    
     '''
     Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
     '''
