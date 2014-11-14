@@ -66,7 +66,6 @@ class Firewall:
         self.rules_file = config['rule']
         # Initialize geo_id map, given the geo_id text file
         self.geo_id_map = self.initialize_geo_id_file("geoipdb.txt")
-        print(self.geo_id_map['US'])
         ########## Initialization of rules lists ##########
 
         # Initialize DNS rules list
@@ -144,7 +143,7 @@ class Firewall:
                     declared_ip_lower_bound = "0.0.0.0"
                     declared_ip_upper_bound = "255.255.255.255"
                 # IP is country code
-                elif (len(ip) == 2):
+                elif (ip.upper() in self.geo_id_map):
                     declared_country_code = ip.upper()
                     declared_ip_lower_bound = "country"
                     declared_ip_upper_bound = "country"
@@ -193,7 +192,7 @@ class Firewall:
                     declared_ip_lower_bound = "0.0.0.0"
                     declared_ip_upper_bound = "255.255.255.255"
                 # IP is country code
-                elif (len(ip) == 2):
+                elif (ip.upper() in self.geo_id_map):
                     declared_country_code = ip.upper()
                     declared_ip_lower_bound = "country"
                     declared_ip_upper_bound = "country"
@@ -240,7 +239,7 @@ class Firewall:
                     declared_ip_lower_bound = "0.0.0.0"
                     declared_ip_upper_bound = "255.255.255.255"
                 # IP is country code
-                elif (len(ip) == 2):
+                elif (ip.upper() in self.geo_id_map):
                     declared_country_code = ip.upper()
                     declared_ip_lower_bound = "country"
                     declared_ip_upper_bound = "country"
@@ -308,65 +307,80 @@ class Firewall:
             # struct.unpack then unpacks this String as a short, and returns it as a tuple with a blank second item
             source_port = struct.unpack('!H', pkt[byte_offset:(byte_offset + 2)])[0]
             destination_port = struct.unpack('!H', pkt[(byte_offset + 2):(byte_offset + 4)])[0]
-            
-            # If the following conditions are met, then we know current packet is a DNS query packet:
-            # (1) UDP packet with destination port 53
-            # (2) has exactly one DNS question entry
-            # The query type of the entry is either A or AAAA (QTYPE == 1 or QTYPE == 28)
-            # QCLASS == 1
-            
-            # Grab question count in DNS header
-            question_count_offset = byte_offset + 12
-            question_count = struct.unpack('!H', pkt[question_count_offset:(question_count_offset + 2)])[0]
-            # Now we find the beginning of the QNAME field
-            q_name_offset = question_count_offset + 8
-
-            # Use q_name_offset to find the beginning of the q_type field
-            q_type_offset = q_name_offset
-            
-            # Build the name of the requested URL
-            q_name = ""
-
-            while ord(pkt[q_type_offset:(q_type_offset + 1)]) is not 0:
-                index = 0
-                current_length = ord(pkt[q_type_offset:(q_type_offset + 1)])
-                q_type_offset += 1
-                while (index < current_length):
-                    current_character = pkt[q_type_offset:(q_type_offset + 1)]
-                    q_name += current_character
-                    q_type_offset += 1
-                    index += 1
-                q_name += "."
-
-            # Move away from the 0 byte
-            q_type_offset += 1
-            q_name = q_name[:(len(q_name) - 1)]
-
-            # At this point, q_name represents the URL that was requested, as a String
-            
-            # At this point, q_type_offset is set correctly
-            # Unpack q_type_offset
-            q_type = struct.unpack('!H', pkt[q_type_offset:(q_type_offset + 2)])[0]
            
-            # Grab q_class and unpack it
-            q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
-        
-            # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
-            if ((destination_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
-                send_packet = self.make_decision_on_dns_packet(pkt, q_name)
+            if destination_port == 53:
+                # If the following conditions are met, then we know current packet is a DNS query packet:
+                # (1) UDP packet with destination port 53
+                # (2) has exactly one DNS question entry
+                # The query type of the entry is either A or AAAA (QTYPE == 1 or QTYPE == 28)
+                # QCLASS == 1
+                
+                # Grab question count in DNS header
+                question_count_offset = byte_offset + 12
+                question_count = struct.unpack('!H', pkt[question_count_offset:(question_count_offset + 2)])[0]
+                # Now we find the beginning of the QNAME field
+                q_name_offset = question_count_offset + 8
+
+                # Use q_name_offset to find the beginning of the q_type field
+                q_type_offset = q_name_offset
+                
+                # Build the name of the requested URL
+                q_name = ""
+
+                while ord(pkt[q_type_offset:(q_type_offset + 1)]) is not 0:
+                    index = 0
+                    current_length = ord(pkt[q_type_offset:(q_type_offset + 1)])
+                    q_type_offset += 1
+                    while (index < current_length):
+                        current_character = pkt[q_type_offset:(q_type_offset + 1)]
+                        q_name += current_character
+                        q_type_offset += 1
+                        index += 1
+                    q_name += "."
+
+                # Move away from the 0 byte
+                q_type_offset += 1
+                q_name = q_name[:(len(q_name) - 1)]
+
+                # At this point, q_name represents the URL that was requested, as a String
+                
+                # At this point, q_type_offset is set correctly
+                # Unpack q_type_offset
+                q_type = struct.unpack('!H', pkt[q_type_offset:(q_type_offset + 2)])[0]
+               
+                # Grab q_class and unpack it
+                q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
+            
+                # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
+                if ((destination_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
+                    send_packet = self.make_decision_on_dns_packet(pkt, q_name)
+                    if send_packet:
+                        if pkt_dir == PKT_DIR_INCOMING:
+                            self.iface_int.send_ip_packet(pkt)
+                        elif pkt_dir == PKT_DIR_OUTGOING:
+                            self.iface_ext.send_ip_packet(pkt)
+                    else:
+                        # We've dropped our packet, so just return
+                        return
+
+            # Current packet is a REGULAR UDP packet
+            else:
+                # TODO: Look at UDP rules list and determine whether UDP packet should be dropped
+                
+                # Destination ip address given by 'dst_ip'; destination port given by 'destination_port'
+                send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port)                
                 if send_packet:
                     if pkt_dir == PKT_DIR_INCOMING:
                         self.iface_int.send_ip_packet(pkt)
                     elif pkt_dir == PKT_DIR_OUTGOING:
                         self.iface_ext.send_ip_packet(pkt)
+                    print("SENT PACKET")
                 else:
                     # We've dropped our packet, so just return
+                    print("DROPPED PACKET")
                     return
 
-            # Current packet is a REGULAR UDP packet
-            else:
-                # TODO: Look at UDP rules list and determine whether UDP packet should be dropped
-                pass
+
 
         #######################################
 
@@ -386,6 +400,46 @@ class Firewall:
         elif pkt_dir == PKT_DIR_OUTGOING:
             self.iface_ext.send_ip_packet(pkt)
         
+
+    '''
+    Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
+    '''
+    def make_decision_on_udp_packet(self, destination_ip, destination_port):
+        
+        pass_packet_through = True
+        for udp_rule in self.udp_rules_list:
+            port_rule_satisfied = False
+            ip_rule_satisfied = False
+
+            port_range = udp_rule.port_range
+
+            # if our packet's destination port lies within the rule's port range
+            if (port_range[1] == float("inf") and port_range[0] == float("-inf")):
+                port_rule_satisfied = True
+            elif ((destination_port <= int(port_range[1])) and (destination_port >= int(port_range[0]))):
+                port_rule_satisfied = True
+
+            # Our IP rule is a country code
+            if udp_rule.country_code is not None:
+                list_of_ip_ranges_for_country = self.geo_id_map[udp_rule.country_code]
+
+                if self.binary_search_list_of_ip_ranges(list_of_ip_ranges_for_country, destination_ip):
+                    ip_rule_satisfied = True
+
+            # Our IP rule is an IP range
+            else:
+                ip_range = udp_rule.ip_range
+                if self.is_ip_contained_within_range(ip_range[0], ip_range[1], destination_ip):
+                    ip_rule_satisfied = True
+
+            # Depending on the verdict and whether our port/ip rules are satisfied, we decide whether to pass/drop the packet
+            if (port_rule_satisfied and ip_rule_satisfied):
+                if (udp_rule.verdict == "PASS"):
+                    pass_packet_through = True
+                elif (udp_rule.verdict == "DROP"):
+                    pass_packet_through = False
+
+        return pass_packet_through    
 
 
     '''
@@ -553,7 +607,7 @@ class Firewall:
     
     Returns true if the 'ip_address' is contained within ANY of the ranges in the list_of_ip_ranges
     '''
-    def binary_search_list_of_ip_ranges(list_of_ip_ranges, ip_address):
+    def binary_search_list_of_ip_ranges(self, list_of_ip_ranges, ip_address):
         low = 0
         high = len(list_of_ip_ranges) - 1
         while (low <= high):
