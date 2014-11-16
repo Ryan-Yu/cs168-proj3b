@@ -112,6 +112,15 @@ class Firewall:
         # Iterate through each rule in rules file, handling different types of rules separately
         for line in rules:
             stripped_line = line.strip()
+            
+            # Ignore empty lines
+            if (len(stripped_line) == 0):
+                continue
+
+            # Ignore comments (lines starting with %)
+            if (stripped_line[0] == '%'):
+                continue
+
             split_line = stripped_line.split(" ")
             
             current_verdict = split_line[0].upper()
