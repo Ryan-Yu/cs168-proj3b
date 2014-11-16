@@ -337,7 +337,14 @@ class Firewall:
             # struct.unpack then unpacks this String as a short, and returns it as a tuple with a blank second item
             source_port = struct.unpack('!H', pkt[byte_offset:(byte_offset + 2)])[0]
             destination_port = struct.unpack('!H', pkt[(byte_offset + 2):(byte_offset + 4)])[0]
-          
+         
+            # Set external IP and external port based on direction of packet
+            external_ip = dst_ip
+            external_port = destination_port
+            if (pkt_dir == PKT_DIR_INCOMING):
+                external_ip = src_ip
+                external_port = source_port
+
             try:
 
                 # If the following conditions are met, then we know current packet is a DNS query packet:
@@ -382,8 +389,8 @@ class Firewall:
                 q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
         
                 # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
-                if ((destination_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
-                    send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port, True, q_name)
+                if ((external_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
+                    send_packet = self.make_decision_on_udp_packet(external_ip, external_port, True, q_name)
                     if send_packet:
                         if pkt_dir == PKT_DIR_INCOMING:
                             self.iface_int.send_ip_packet(pkt)
@@ -399,7 +406,7 @@ class Firewall:
                 # Not a DNS query packet (it is a regular UDP packet)
                 else:
                     # Destination ip address given by 'dst_ip'; destination port given by 'destination_port'
-                    send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port, False)                
+                    send_packet = self.make_decision_on_udp_packet(external_ip, external_port, False)                
                     if send_packet:
                         if pkt_dir == PKT_DIR_INCOMING:
                             self.iface_int.send_ip_packet(pkt)
@@ -416,7 +423,7 @@ class Firewall:
                 # Look at UDP rules list and determine whether UDP packet should be dropped
                  
                 # Destination ip address given by 'dst_ip'; destination port given by 'destination_port'
-                send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port, False)                
+                send_packet = self.make_decision_on_udp_packet(external_ip, external_port, False)                
                 if send_packet:
                     if pkt_dir == PKT_DIR_INCOMING:
                         self.iface_int.send_ip_packet(pkt)
@@ -439,17 +446,24 @@ class Firewall:
             # struct.unpack then unpacks this String as a short, and returns it as a tuple with a blank second item
             source_port = struct.unpack('!H', pkt[byte_offset:(byte_offset + 2)])[0]
             destination_port = struct.unpack('!H', pkt[(byte_offset + 2):(byte_offset + 4)])[0]
-           
-            send_packet = self.make_decision_on_tcp_packet(dst_ip, destination_port)                
+            
+            # Set external IP and external port based on direction of packet
+            external_ip = dst_ip
+            external_port = destination_port
+            if (pkt_dir == PKT_DIR_INCOMING):
+                external_ip = src_ip
+                external_port = source_port
+
+            send_packet = self.make_decision_on_tcp_packet(external_ip, external_port)                
             if send_packet:
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
-                # print("SENT TCP PACKET")
+                print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
-                # print("DROPPED TCP PACKET")
+                print("DROPPED TCP PACKET")
                 return
 
 
@@ -458,9 +472,14 @@ class Firewall:
         elif (packet_protocol_number == 1):
             # Look at ICMP rules list and determine whether ICMP packet should be dropped
             
+            # Set external IP based on direction of packet
+            external_ip = dst_ip
+            if (pkt_dir == PKT_DIR_INCOMING):
+                external_ip = src_ip
+
             # Parse ICMP type from the packet
             icmp_type = ord(pkt[byte_offset:(byte_offset + 1)])
-            send_packet = self.make_decision_on_icmp_packet(dst_ip, icmp_type)                
+            send_packet = self.make_decision_on_icmp_packet(external_ip, icmp_type)                
             if send_packet:
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
