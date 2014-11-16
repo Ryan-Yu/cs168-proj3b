@@ -58,6 +58,19 @@ class ICMPRule:
         return string_representation
 
 
+class DNSRule:
+    def __init__(self, domain, type_of_match, verdict):
+        self.domain = domain
+        self.type_of_match = type_of_match
+        self.verdict = verdict
+
+    def __str__(self):
+        string_repres = "\nDNS RULE --\n"
+        string_repres += "Domain: %s\n" % self.domain
+        string_repres += "Type of match: %s\n" % self.type_of_match
+        string_repres += "Verdict: %s\n" % self.verdict
+        return string_repres
+
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
@@ -113,17 +126,25 @@ class Firewall:
                # Entries look like: <current_domain, T/F>
                if (split_line[2].startswith("*")):
                    if (current_verdict == "PASS"):
-                       self.dns_rules_list.append((current_domain[1:], ("WILDCARD", "PASS")))
+                       new_dns_rule = DNSRule(current_domain[1:], "WILDCARD", "PASS")
+                       self.udp_rules_list.append(new_dns_rule)
+                       
                    # current verdict is DROP, so we set value to False
                    else:
-                       self.dns_rules_list.append((current_domain[1:], ("WILDCARD", "DROP")))
+                       new_dns_rule = DNSRule(current_domain[1:], "WILDCARD", "DROP")
+                       self.udp_rules_list.append(new_dns_rule)
+                       
                # Exact match
                else:
                    if (current_verdict == "PASS"):
-                       self.dns_rules_list.append((current_domain, ("EXACT", "PASS")))
+                       new_dns_rule = DNSRule(current_domain, "EXACT", "PASS")
+                       self.udp_rules_list.append(new_dns_rule)
+                       
                    # Current verdict is DROP, so we set value to False
                    else:
-                       self.dns_rules_list.append((current_domain, ("EXACT", "DROP")))
+                       new_dns_rule = DNSRule(current_domain, "EXACT", "DROP")
+                       self.udp_rules_list.append(new_dns_rule)
+                       
 
             ########## Handle TCP rule ##########
             elif (current_protocol == "TCP"):
@@ -307,14 +328,14 @@ class Firewall:
             # struct.unpack then unpacks this String as a short, and returns it as a tuple with a blank second item
             source_port = struct.unpack('!H', pkt[byte_offset:(byte_offset + 2)])[0]
             destination_port = struct.unpack('!H', pkt[(byte_offset + 2):(byte_offset + 4)])[0]
-           
-            if destination_port == 53:
+          
+            try:
+
                 # If the following conditions are met, then we know current packet is a DNS query packet:
                 # (1) UDP packet with destination port 53
                 # (2) has exactly one DNS question entry
                 # The query type of the entry is either A or AAAA (QTYPE == 1 or QTYPE == 28)
                 # QCLASS == 1
-                
                 # Grab question count in DNS header
                 question_count_offset = byte_offset + 12
                 question_count = struct.unpack('!H', pkt[question_count_offset:(question_count_offset + 2)])[0]
@@ -350,25 +371,43 @@ class Firewall:
                
                 # Grab q_class and unpack it
                 q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
-            
+        
                 # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
                 if ((destination_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
-                    send_packet = self.make_decision_on_dns_packet(pkt, q_name)
+                    send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port, True, q_name)
                     if send_packet:
                         if pkt_dir == PKT_DIR_INCOMING:
                             self.iface_int.send_ip_packet(pkt)
                         elif pkt_dir == PKT_DIR_OUTGOING:
                             self.iface_ext.send_ip_packet(pkt)
+
+                        print("SENT DNS PACKET")
                     else:
                         # We've dropped our packet, so just return
+                        print("DROPPED DNS PACKET")
+                        return
+                
+                # Not a DNS query packet (it is a regular UDP packet)
+                else:
+                    # Destination ip address given by 'dst_ip'; destination port given by 'destination_port'
+                    send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port, False)                
+                    if send_packet:
+                        if pkt_dir == PKT_DIR_INCOMING:
+                            self.iface_int.send_ip_packet(pkt)
+                        elif pkt_dir == PKT_DIR_OUTGOING:
+                            self.iface_ext.send_ip_packet(pkt)
+                        print("SENT UDP PACKET")
+                    else:
+                        # We've dropped our packet, so just return
+                        print("DROPPED UDP PACKET")
                         return
 
-            # Current packet is a REGULAR UDP packet
-            else:
+            # Current packet is a regular UDP packet, because we encountered an error trying to parse DNS-specific stuff
+            except:
                 # Look at UDP rules list and determine whether UDP packet should be dropped
-                
+                 
                 # Destination ip address given by 'dst_ip'; destination port given by 'destination_port'
-                send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port)                
+                send_packet = self.make_decision_on_udp_packet(dst_ip, destination_port, False)                
                 if send_packet:
                     if pkt_dir == PKT_DIR_INCOMING:
                         self.iface_int.send_ip_packet(pkt)
@@ -398,10 +437,10 @@ class Firewall:
                     self.iface_int.send_ip_packet(pkt)
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
-                print("SENT TCP PACKET")
+                # print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
-                print("DROPPED TCP PACKET")
+                # print("DROPPED TCP PACKET")
                 return
 
 
@@ -517,42 +556,108 @@ class Firewall:
     '''
     Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
     '''
-    def make_decision_on_udp_packet(self, destination_ip, destination_port):
-        
+    def make_decision_on_udp_packet(self, destination_ip, destination_port, is_dns_packet, domain_name=None):
         pass_packet_through = True
-        for udp_rule in self.udp_rules_list:
-            port_rule_satisfied = False
-            ip_rule_satisfied = False
+        
+        # We're not making a decision on a DNS Query packet, so we iterate through ONLY the UDP rules (and not the DNS rules)
+        if not is_dns_packet:
+            for udp_rule in self.udp_rules_list:
+                
+                if isinstance(udp_rule, DNSRule):
+                    continue
 
-            port_range = udp_rule.port_range
+                port_rule_satisfied = False
+                ip_rule_satisfied = False
 
-            # if our packet's destination port lies within the rule's port range
-            if (port_range[1] == float("inf") and port_range[0] == float("-inf")):
-                port_rule_satisfied = True
-            elif ((destination_port <= int(port_range[1])) and (destination_port >= int(port_range[0]))):
-                port_rule_satisfied = True
+                port_range = udp_rule.port_range
 
-            # Our IP rule is a country code
-            if udp_rule.country_code is not None:
-                list_of_ip_ranges_for_country = self.geo_id_map[udp_rule.country_code]
+                # if our packet's destination port lies within the rule's port range
+                if (port_range[1] == float("inf") and port_range[0] == float("-inf")):
+                    port_rule_satisfied = True
+                elif ((destination_port <= int(port_range[1])) and (destination_port >= int(port_range[0]))):
+                    port_rule_satisfied = True
 
-                if self.binary_search_list_of_ip_ranges(list_of_ip_ranges_for_country, destination_ip):
-                    ip_rule_satisfied = True
+                # Our IP rule is a country code
+                if udp_rule.country_code is not None:
+                    list_of_ip_ranges_for_country = self.geo_id_map[udp_rule.country_code]
 
-            # Our IP rule is an IP range
-            else:
-                ip_range = udp_rule.ip_range
-                if self.is_ip_contained_within_range(ip_range[0], ip_range[1], destination_ip):
-                    ip_rule_satisfied = True
+                    if self.binary_search_list_of_ip_ranges(list_of_ip_ranges_for_country, destination_ip):
+                        ip_rule_satisfied = True
 
-            # Depending on the verdict and whether our port/ip rules are satisfied, we decide whether to pass/drop the packet
-            if (port_rule_satisfied and ip_rule_satisfied):
-                if (udp_rule.verdict == "PASS"):
-                    pass_packet_through = True
-                elif (udp_rule.verdict == "DROP"):
-                    pass_packet_through = False
+                # Our IP rule is an IP range
+                else:
+                    ip_range = udp_rule.ip_range
+                    if self.is_ip_contained_within_range(ip_range[0], ip_range[1], destination_ip):
+                        ip_rule_satisfied = True
 
+                # Depending on the verdict and whether our port/ip rules are satisfied, we decide whether to pass/drop the packet
+                if (port_rule_satisfied and ip_rule_satisfied):
+                    if (udp_rule.verdict == "PASS"):
+                        pass_packet_through = True
+                    elif (udp_rule.verdict == "DROP"):
+                        pass_packet_through = False
+        
+        # We are making a decision on a DNS Query packet, so iterate through ALL rules, including DNS rules
+        else:
+            for udp_rule in self.udp_rules_list:
+                
+                # Consider DNS rule
+                if isinstance(udp_rule, DNSRule):
+                    
+                    if (udp_rule.type_of_match == "EXACT"):
+                        # If we've matched exactly...
+                        if (domain_name == udp_rule.domain):
+                            if (udp_rule.verdict == "DROP"):
+                                pass_packet_through = False
+                            elif (udp_rule.verdict == "PASS"):
+                                pass_packet_through = True
+
+                    
+                    # Wild card matches
+                    else:  
+                        # If we've matched our wild card
+                        if (domain_name.endswith(udp_rule.domain)):
+                            if (udp_rule.verdict == "DROP"):
+                                pass_packet_through = False
+                            elif (udp_rule.verdict == "PASS"):
+                                pass_packet_through = True
+                
+                # Consider regular UDP rule
+                elif isinstance(udp_rule, UDPRule):
+                    port_rule_satisfied = False
+                    ip_rule_satisfied = False
+
+                    port_range = udp_rule.port_range
+
+                    # if our packet's destination port lies within the rule's port range
+                    if (port_range[1] == float("inf") and port_range[0] == float("-inf")):
+                        port_rule_satisfied = True
+                    elif ((destination_port <= int(port_range[1])) and (destination_port >= int(port_range[0]))):
+                        port_rule_satisfied = True
+
+                    # Our IP rule is a country code
+                    if udp_rule.country_code is not None:
+                        list_of_ip_ranges_for_country = self.geo_id_map[udp_rule.country_code]
+
+                        if self.binary_search_list_of_ip_ranges(list_of_ip_ranges_for_country, destination_ip):
+                            ip_rule_satisfied = True
+
+                    # Our IP rule is an IP range
+                    else:
+                        ip_range = udp_rule.ip_range
+                        if self.is_ip_contained_within_range(ip_range[0], ip_range[1], destination_ip):
+                            ip_rule_satisfied = True
+
+                    # Depending on the verdict and whether our port/ip rules are satisfied, we decide whether to pass/drop the packet
+                    if (port_rule_satisfied and ip_rule_satisfied):
+                        if (udp_rule.verdict == "PASS"):
+                            pass_packet_through = True
+                        elif (udp_rule.verdict == "DROP"):
+                            pass_packet_through = False
+        
         return pass_packet_through    
+
+
 
 
     '''
