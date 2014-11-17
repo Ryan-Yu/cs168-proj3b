@@ -94,6 +94,8 @@ class Firewall:
         self.initialize_all_maps(self.rules_file)
 
         ########## End of initialization of rules lists ##########
+        
+        '''
         for udp_rule in self.udp_rules_list:
             print(udp_rule)
 
@@ -102,11 +104,10 @@ class Firewall:
 
         for icmp_rule in self.icmp_rules_list:
             print(icmp_rule)
-
+        '''
 
     def initialize_all_maps(self, rules_file):
        
-        # TODO: Still need to ignore blank lines and lines with comments
         rules = open(rules_file)
         
         # Iterate through each rule in rules file, handling different types of rules separately
@@ -316,17 +317,21 @@ class Firewall:
     def handle_packet(self, pkt_dir, pkt):
         # Whenever a packet is captured, this handler will be invoked. 
         
-        src_ip = socket.inet_ntoa(pkt[12:16])
-        dst_ip = socket.inet_ntoa(pkt[16:20])
+        try: 
+            src_ip = socket.inet_ntoa(pkt[12:16])
+            dst_ip = socket.inet_ntoa(pkt[16:20])
 
-        src_ip_array = src_ip.split(".")
-        dst_ip_array = dst_ip.split(".")
+            src_ip_array = src_ip.split(".")
+            dst_ip_array = dst_ip.split(".")
 
-        ip_header_length = ord(pkt[0:1]) & 0x0f
-        # i.e. number of bytes before UDP/TCP header begins
-        byte_offset = ip_header_length * 4
+            ip_header_length = ord(pkt[0:1]) & 0x0f
+            # i.e. number of bytes before UDP/TCP header begins
+            byte_offset = ip_header_length * 4
 
-        packet_protocol_number = ord(pkt[9:10])
+            packet_protocol_number = ord(pkt[9:10])
+
+        except:
+            return
 
         ######################################### 
         # UDP case
@@ -397,10 +402,10 @@ class Firewall:
                         elif pkt_dir == PKT_DIR_OUTGOING:
                             self.iface_ext.send_ip_packet(pkt)
 
-                        print("SENT DNS PACKET")
+                        # print("SENT DNS PACKET")
                     else:
                         # We've dropped our packet, so just return
-                        print("DROPPED DNS PACKET")
+                        # print("DROPPED DNS PACKET")
                         return
                 
                 # Not a DNS query packet (it is a regular UDP packet)
@@ -412,10 +417,10 @@ class Firewall:
                             self.iface_int.send_ip_packet(pkt)
                         elif pkt_dir == PKT_DIR_OUTGOING:
                             self.iface_ext.send_ip_packet(pkt)
-                        print("SENT UDP PACKET")
+                        # print("SENT UDP PACKET")
                     else:
                         # We've dropped our packet, so just return
-                        print("DROPPED UDP PACKET")
+                        # print("DROPPED UDP PACKET")
                         return
 
             # Current packet is a regular UDP packet, because we encountered an error trying to parse DNS-specific stuff
@@ -429,10 +434,10 @@ class Firewall:
                         self.iface_int.send_ip_packet(pkt)
                     elif pkt_dir == PKT_DIR_OUTGOING:
                         self.iface_ext.send_ip_packet(pkt)
-                    print("SENT UDP PACKET")
+                    # print("SENT UDP PACKET")
                 else:
                     # We've dropped our packet, so just return
-                    print("DROPPED UDP PACKET")
+                    # print("DROPPED UDP PACKET")
                     return
 
 
@@ -460,10 +465,10 @@ class Firewall:
                     self.iface_int.send_ip_packet(pkt)
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
-                print("SENT TCP PACKET")
+                # print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
-                print("DROPPED TCP PACKET")
+                # print("DROPPED TCP PACKET")
                 return
 
 
@@ -485,10 +490,10 @@ class Firewall:
                     self.iface_int.send_ip_packet(pkt)
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
-                print("SENT ICMP PACKET")
+                # print("SENT ICMP PACKET")
             else:
                 # We've dropped our packet, so just return
-                print("DROPPED ICMP PACKET")
+                # print("DROPPED ICMP PACKET")
                 return
 
 
