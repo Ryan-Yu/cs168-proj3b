@@ -465,16 +465,16 @@ class Firewall:
                 internal_ip = dst_ip
                 internal_port = destination_port
 
-            send_packet = self.make_decision_on_tcp_packet(external_ip, external_port, internal_ip, internal_port, pkt)                
+            send_packet = self.make_decision_on_tcp_packet(pkt_dir, external_ip, external_port, internal_ip, internal_port, pkt)                
             if send_packet:
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
-                # print("SENT TCP PACKET")
+                print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
-                # print("DROPPED TCP PACKET")
+                print("DROPPED TCP PACKET")
                 return
 
 
@@ -554,7 +554,7 @@ class Firewall:
     '''
     Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
     '''
-    def make_decision_on_tcp_packet(self, destination_ip, destination_port, source_ip, source_port, packet):
+    def make_decision_on_tcp_packet(self, pkt_dir, destination_ip, destination_port, source_ip, source_port, packet):
         
         pass_packet_through = True
         for tcp_rule in self.tcp_rules_list:
@@ -592,8 +592,12 @@ class Firewall:
                 elif (tcp_rule.verdict == "DENY"):
                     pass_packet_through = False
 
-                    self.send_reset_packet(packet, destination_ip, destination_port, source_ip, source_port)
-    
+                    # Generate the RST packet, and send it, given direction
+                    reset_packet_to_send = self.generate_reset_packet(packet)
+                    if pkt_dir == PKT_DIR_INCOMING:
+                        self.iface_ext.send_ip_packet(reset_packet_to_send)
+                    elif pkt_dir == PKT_DIR_OUTGOING:
+                        self.iface_int.send_ip_packet(reset_packet_to_send)
         
         return pass_packet_through 
     
@@ -734,7 +738,7 @@ class Firewall:
         return pass_packet_through
 
 
-    def send_reset_packet(self, packet, destination_ip, destination_port, source_ip, source_port):
+    def generate_reset_packet(self, packet):
         # Need destination_ip, destination_port, ipv4 header length 
         # Need to set RST flag to 1
 
@@ -744,20 +748,69 @@ class Firewall:
        
         packet_total_length = struct.unpack('!H', packet[2:4])[0]
 
-        reset_packet_tcp_checksum = self.calculate_tcp_checksum(packet_total_length, ip_header_length * 4, packet)
+        reset_packet_tcp_checksum = self.calculate_tcp_checksum(packet_total_length, ip_header_length * 4, packet) 
+
+        # Pack first 2 bytes of IP header
+        reset_packet_to_send += packet[0:2]
+        
+        # Pack total length into IP header
+        reset_packet_to_send += (struct.pack('!H', 40))
+        
+        reset_packet_to_send += packet[4:6]
+        reset_packet_to_send += packet[6:8]
+        reset_packet_to_send += packet[8:10]
+
+        # Pack IP header checksum
+        reset_packet_to_send += (struct.pack('!H', reset_packet_checksum))
+
+        reset_packet_destination_ip = packet[12:16]
+        reset_packet_source_ip = packet[16:20]
+
+        reset_packet_to_send += reset_packet_source_ip
+        reset_packet_to_send += reset_packet_destination_ip
+
+        ##### TODO: Might need to add more stuff in the IP section of the packet,
+        ##### depending on whether the length is 20 or variable
+
+        ########## TCP header ##########
+        reset_packet_source_port = packet[(ip_header_length + 2):(ip_header_length + 4)]
+        reset_packet_destination_port = packet[(ip_header_length):(ip_header_length + 2)]
+
+        # Pack packet source and destination ports
+        reset_packet_to_send += reset_packet_source_port
+        reset_packet_to_send += reset_packet_destination_port
+
+        previous_sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
+        new_sequence_number = 0
+
+        # Increase sequence number by 1 and pack it
+        reset_packet_to_send += struct.pack('!L', new_sequence_number)
+
+        # Pack ACK number 
+        reset_packet_to_send += struct.pack('!L', previous_sequence_number + 1)
+
+        reset_packet_to_send += packet[(ip_header_length + 12):(ip_header_length + 13)]
+
+        # Pack flags into 1 byte, with ACK and RST flags turned on
+        reset_packet_to_send += struct.pack('!B', 0x14)
+
+        reset_packet_to_send += packet[(ip_header_length + 14):(ip_header_length + 16)]
+
+        # Pack TCP checksum
+        reset_packet_to_send += (struct.pack('!H', reset_packet_tcp_checksum))
+        
+        reset_packet_to_send += packet[(ip_header_length + 18):(ip_header_length + 20)]
+        
+        return reset_packet_to_send
 
         
 
-        reset_packet_destination_ip = source_ip
-        reset_packet_destination_port = source_port
-
-
-
     def calculate_tcp_checksum(self, total_length, ip_header_length, packet):
-        print("Total length: %s; ip header length: %s" % (total_length, ip_header_length))
       
-        source_ip = struct.unpack('!L', packet[12:16])[0]
-        destination_ip = struct.unpack('!L', packet[16:20])[0]
+        source_ip = struct.unpack('!H', packet[12:14])[0]
+        source_ip_segment_2 = struct.unpack('!H', packet[14:16])[0]
+        destination_ip = struct.unpack('!H', packet[16:18])[0]
+        destination_ip_segment_2 = struct.unpack('!H', packet[18:20])[0]
 
         byte_counter = ip_header_length
         total_sum = 0
@@ -772,8 +825,8 @@ class Firewall:
             byte_counter += 2
        
         # Add on the source IP, destination IP, protocol (always 6), total 16-bit TCP length
-        total_sum += source_ip
-        total_sum += destination_ip
+        total_sum += source_ip + source_ip_segment_2
+        total_sum += destination_ip + destination_ip_segment_2
         total_sum += 6
         total_sum += (total_length - ip_header_length)
 
