@@ -455,11 +455,17 @@ class Firewall:
             # Set external IP and external port based on direction of packet
             external_ip = dst_ip
             external_port = destination_port
+
+            internal_ip = src_ip
+            internal_port = source_port
+
             if (pkt_dir == PKT_DIR_INCOMING):
                 external_ip = src_ip
                 external_port = source_port
+                internal_ip = dst_ip
+                internal_port = destination_port
 
-            send_packet = self.make_decision_on_tcp_packet(external_ip, external_port, pkt)                
+            send_packet = self.make_decision_on_tcp_packet(external_ip, external_port, internal_ip, internal_port, pkt)                
             if send_packet:
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
@@ -548,7 +554,7 @@ class Firewall:
     '''
     Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
     '''
-    def make_decision_on_tcp_packet(self, destination_ip, destination_port, packet):
+    def make_decision_on_tcp_packet(self, destination_ip, destination_port, source_ip, source_port, packet):
         
         pass_packet_through = True
         for tcp_rule in self.tcp_rules_list:
@@ -586,7 +592,7 @@ class Firewall:
                 elif (tcp_rule.verdict == "DENY"):
                     pass_packet_through = False
 
-                    self.send_reset_packet(packet, destination_ip, destination_port)
+                    self.send_reset_packet(packet, destination_ip, destination_port, source_ip, source_port)
     
         
         return pass_packet_through 
@@ -728,13 +734,72 @@ class Firewall:
         return pass_packet_through
 
 
-    def send_reset_packet(self, packet, destination_ip, destination_port):
+    def send_reset_packet(self, packet, destination_ip, destination_port, source_ip, source_port):
         # Need destination_ip, destination_port, ipv4 header length 
         # Need to set RST flag to 1
 
         reset_packet_to_send = ""
         ip_header_length = ord(packet[0:1]) & 0x0f
         reset_packet_checksum = self.calculate_checksum(ip_header_length * 4, packet)
+       
+        packet_total_length = struct.unpack('!H', packet[2:4])[0]
+
+        reset_packet_tcp_checksum = self.calculate_tcp_checksum(packet_total_length, ip_header_length * 4, packet)
+
+        
+
+        reset_packet_destination_ip = source_ip
+        reset_packet_destination_port = source_port
+
+
+
+    def calculate_tcp_checksum(self, total_length, ip_header_length, packet):
+        print("Total length: %s; ip header length: %s" % (total_length, ip_header_length))
+      
+        source_ip = struct.unpack('!L', packet[12:16])[0]
+        destination_ip = struct.unpack('!L', packet[16:20])[0]
+
+        byte_counter = ip_header_length
+        total_sum = 0
+
+        # Parse up to the tcp checksum, which starts at byte 16
+        while (byte_counter < total_length):
+            # Skip 2 bytes of tcp checksum
+            if (byte_counter == (16 + ip_header_length)):
+                byte_counter += 2
+                continue
+            total_sum += struct.unpack('!H', packet[byte_counter:(byte_counter + 2)])[0]    
+            byte_counter += 2
+       
+        # Add on the source IP, destination IP, protocol (always 6), total 16-bit TCP length
+        total_sum += source_ip
+        total_sum += destination_ip
+        total_sum += 6
+        total_sum += (total_length - ip_header_length)
+
+        # Extract first four bits of our sum as a binary string
+        first_four_bits = bin(total_sum)[:6]
+
+        # Isolate the remainder of our sum as a binary string
+        final_segment = bin(total_sum)[6:]
+        final_segment = '0b%s' % final_segment
+
+        # Add the carry and the remainder
+        summed_segment = bin(int(first_four_bits, 2) + int(final_segment, 2))
+       
+        # Flip all bits in summed_segment
+        final_checksum = '0b'
+        index = 2
+        while (index < len(summed_segment)):
+            if (summed_segment[index] == '0'):
+                final_checksum += '1'
+            else:
+                final_checksum += '0'
+            index += 1
+  
+        decimal_final_checksum = int(final_checksum, 2)
+        return decimal_final_checksum
+
 
 
     '''
