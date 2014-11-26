@@ -95,7 +95,7 @@ class Firewall:
 
         ########## End of initialization of rules lists ##########
         
-        '''
+        
         for udp_rule in self.udp_rules_list:
             print(udp_rule)
 
@@ -104,7 +104,7 @@ class Firewall:
 
         for icmp_rule in self.icmp_rules_list:
             print(icmp_rule)
-        '''
+        
 
     def initialize_all_maps(self, rules_file):
        
@@ -459,16 +459,16 @@ class Firewall:
                 external_ip = src_ip
                 external_port = source_port
 
-            send_packet = self.make_decision_on_tcp_packet(external_ip, external_port)                
+            send_packet = self.make_decision_on_tcp_packet(external_ip, external_port, pkt)                
             if send_packet:
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
-                # print("SENT TCP PACKET")
+                print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
-                # print("DROPPED TCP PACKET")
+                print("DROPPED TCP PACKET")
                 return
 
 
@@ -548,7 +548,7 @@ class Firewall:
     '''
     Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
     '''
-    def make_decision_on_tcp_packet(self, destination_ip, destination_port):
+    def make_decision_on_tcp_packet(self, destination_ip, destination_port, packet):
         
         pass_packet_through = True
         for tcp_rule in self.tcp_rules_list:
@@ -582,7 +582,12 @@ class Firewall:
                     pass_packet_through = True
                 elif (tcp_rule.verdict == "DROP"):
                     pass_packet_through = False
+                # New rule for project 3b
+                elif (tcp_rule.verdict == "DENY"):
+                    pass_packet_through = False
 
+                    self.send_reset_packet(packet, destination_ip, destination_port)
+    
         return pass_packet_through 
     
     
@@ -720,6 +725,10 @@ class Firewall:
                         pass_packet_through = True
                 
         return pass_packet_through
+
+
+    def send_reset_packet(self, packet, destination_ip, destination_port):
+        pass
 
 
     '''
