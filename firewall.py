@@ -465,10 +465,10 @@ class Firewall:
                     self.iface_int.send_ip_packet(pkt)
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
-                print("SENT TCP PACKET")
+                # print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
-                print("DROPPED TCP PACKET")
+                # print("DROPPED TCP PACKET")
                 return
 
 
@@ -588,6 +588,7 @@ class Firewall:
 
                     self.send_reset_packet(packet, destination_ip, destination_port)
     
+        
         return pass_packet_through 
     
     
@@ -728,7 +729,53 @@ class Firewall:
 
 
     def send_reset_packet(self, packet, destination_ip, destination_port):
-        pass
+        # Need destination_ip, destination_port, ipv4 header length 
+        # Need to set RST flag to 1
+
+        reset_packet_to_send = ""
+        ip_header_length = ord(packet[0:1]) & 0x0f
+        reset_packet_checksum = self.calculate_checksum(ip_header_length * 4, packet)
+
+
+    '''
+    Calculates a new checksum (in decimal) based off of an IPv4 header, and a header_length (given in bytes)
+    '''
+    def calculate_checksum(self, ipv4_header_length, packet):
+        
+        byte_counter = 0
+        total_sum = 0
+
+        # Parse up to the header checksum, which starts at byte 10
+        while (byte_counter < ipv4_header_length):
+            # Skip 2 bytes of ipv4 checksum
+            if (byte_counter == 10):
+                byte_counter += 2
+                continue
+            total_sum += struct.unpack('!H', packet[byte_counter:(byte_counter + 2)])[0]    
+            byte_counter += 2
+        
+        # Extract first four bits of our sum as a binary string
+        first_four_bits = bin(total_sum)[:6]
+
+        # Isolate the remainder of our sum as a binary string
+        final_segment = bin(total_sum)[6:]
+        final_segment = '0b%s' % final_segment
+
+        # Add the carry and the remainder
+        summed_segment = bin(int(first_four_bits, 2) + int(final_segment, 2))
+       
+        # Flip all bits in summed_segment
+        final_checksum = '0b'
+        index = 2
+        while (index < len(summed_segment)):
+            if (summed_segment[index] == '0'):
+                final_checksum += '1'
+            else:
+                final_checksum += '0'
+            index += 1
+  
+        decimal_final_checksum = int(final_checksum, 2)
+        return decimal_final_checksum
 
 
     '''
