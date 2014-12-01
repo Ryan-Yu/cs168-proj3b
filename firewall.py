@@ -138,7 +138,10 @@ class Firewall:
                    if (current_verdict == "PASS"):
                        new_dns_rule = DNSRule(current_domain[1:], "WILDCARD", "PASS")
                        self.udp_rules_list.append(new_dns_rule)
-                       
+                    
+                   elif (current_verdict == "DENY"):
+                       new_dns_rule = DNSRUle(current_domain[1:], "WILDCARD", "DENY")
+                       self.udp_rules_list.append(new_dns_rule)
                    # current verdict is DROP, so we set value to False
                    else:
                        new_dns_rule = DNSRule(current_domain[1:], "WILDCARD", "DROP")
@@ -150,6 +153,10 @@ class Firewall:
                        new_dns_rule = DNSRule(current_domain, "EXACT", "PASS")
                        self.udp_rules_list.append(new_dns_rule)
                        
+                   elif (current_verdict == "DENY"):
+                       new_dns_rule = DNSRule(current_domain, "EXACT", "DENY")
+                       self.udp_rules_list.append(new_dns_rule)
+
                    # Current verdict is DROP, so we set value to False
                    else:
                        new_dns_rule = DNSRule(current_domain, "EXACT", "DROP")
@@ -389,23 +396,23 @@ class Firewall:
                 # At this point, q_type_offset is set correctly
                 # Unpack q_type_offset
                 q_type = struct.unpack('!H', pkt[q_type_offset:(q_type_offset + 2)])[0]
-               
+
                 # Grab q_class and unpack it
                 q_class = struct.unpack('!H', pkt[(q_type_offset + 2):(q_type_offset + 4)])[0]
         
                 # If we have satisfied all of our DNS conditions, then we have verified this packet is a DNS query packet
                 if ((external_port == 53) and (question_count == 1) and ((q_type == 1) or (q_type == 28)) and (q_class == 1)):
-                    send_packet = self.make_decision_on_udp_packet(external_ip, external_port, True, q_name)
+                    send_packet = self.make_decision_on_udp_packet(external_ip, external_port, True, q_name, q_type, q_type_offset)
                     if send_packet:
                         if pkt_dir == PKT_DIR_INCOMING:
                             self.iface_int.send_ip_packet(pkt)
                         elif pkt_dir == PKT_DIR_OUTGOING:
                             self.iface_ext.send_ip_packet(pkt)
 
-                        # print("SENT DNS PACKET")
+                        print("SENT DNS PACKET")
                     else:
                         # We've dropped our packet, so just return
-                        # print("DROPPED DNS PACKET")
+                        print("DROPPED DNS PACKET")
                         return
                 
                 # Not a DNS query packet (it is a regular UDP packet)
@@ -594,7 +601,6 @@ class Firewall:
 
                     # Generate the RST packet, and send it, given direction
                     reset_packet_to_send = self.generate_reset_packet(packet)
-                    #self.iface_int.send_ip_packet(reset_packet_to_send)
                     
                     if pkt_dir == PKT_DIR_INCOMING:
                         self.iface_ext.send_ip_packet(reset_packet_to_send)
@@ -608,7 +614,7 @@ class Firewall:
     '''
     Returns true if the UDP packet with destination_ip and destination_port should be passed, and false if it should be dropped
     '''
-    def make_decision_on_udp_packet(self, destination_ip, destination_port, is_dns_packet, domain_name=None):
+    def make_decision_on_udp_packet(self, destination_ip, destination_port, is_dns_packet, domain_name=None, q_type=None, q_type_offset=None):
         pass_packet_through = True
         
         # We're not making a decision on a DNS Query packet, so we iterate through ONLY the UDP rules (and not the DNS rules)
@@ -663,8 +669,15 @@ class Firewall:
                                 pass_packet_through = False
                             elif (udp_rule.verdict == "PASS"):
                                 pass_packet_through = True
+                            elif (udp_rule.verdict == "DENY"):
+                                pass_packet_through = False
+                                # Only generate DNS deny packet if q_type == 1 (we ignore when q_type is 28)
+                                if (q_type == 1):
+                                    print("I am about to make a DNS packet!!")
+                                    dns_deny_packet = self.generate_dns_deny_packet(packet, domain_name, q_type_offset)
+                                    print("I made a DNS packet")
+                                    self.iface_int.send_ip_packet(dns_deny_packet)
 
-                    
                     # Wild card matches
                     else:  
                         # If we've matched our wild card
@@ -673,7 +686,13 @@ class Firewall:
                                 pass_packet_through = False
                             elif (udp_rule.verdict == "PASS"):
                                 pass_packet_through = True
-                
+                            elif (udp_rule.verdict == "DENY"):
+                                pass_packet_through = False
+                                # Only generate DNS deny packet if q_type == 1 (we ignore when q_type is 28)
+                                if (q_type == 1):
+                                    dns_deny_packet = self.generate_dns_deny_packet(packet, domain_name, q_type_offset)
+                                    self.iface_int.send_ip_packet(dns_deny_packet)
+
                 # Consider regular UDP rule
                 elif isinstance(udp_rule, UDPRule):
                     port_rule_satisfied = False
@@ -711,35 +730,74 @@ class Firewall:
 
 
 
+    def generate_dns_deny_packet(self, packet, domain_name, q_type_offset):
+        dns_deny_packet_to_send = ""
+        ip_header_length = ord(packet[0:1]) & 0x0f
+        ip_header_length = ip_header_length * 4
 
-    '''
-    Returns true if the DNS packet that is requesting the domain 'domain_name'
-    should be passed, and returns false if the packet should be dropped
-    '''
-    def make_decision_on_dns_packet(self, packet, domain_name):
-        pass_packet_through = True
-        for (matched_domain_name, (type_of_match, verdict)) in self.dns_rules_list:
-            
-            # Exact matches
-            if (type_of_match == "EXACT"):
-                # If we've matched exactly...
-                if (matched_domain_name == domain_name):
-                    if (verdict == "DROP"):
-                        pass_packet_through = False
-                    elif (verdict == "PASS"):
-                        pass_packet_through = True
-            
-            # Wild card matches
-            else:  
-                # If we've matched our wild card
-                if (domain_name.endswith(matched_domain_name)):
-                    if (verdict == "DROP"):
-                        pass_packet_through = False
-                    elif (verdict == "PASS"):
-                        pass_packet_through = True
-                
-        return pass_packet_through
+        packet_total_length = struct.unpack('!H', packet[2:4])[0]
 
+        # Pack first 2 bytes of IP header
+        dns_deny_packet_to_send += packet[0:2]
+        
+        # Pack total length into IP header
+        dns_deny_packet_to_send += packet[2:4]
+        
+        dns_deny_packet_to_send += packet[4:6]
+        dns_deny_packet_to_send += packet[6:8]
+        # Pack TTL of 64
+        dns_deny_packet_to_send += struct.pack('!B', 64)
+        dns_deny_packet_to_send += packet[9:10]
+
+        # Pad bytes 10-12 with zeros (the bytes reserved for IP checksum)
+        dns_deny_packet_to_send += (struct.pack('!H', 0))
+
+        dns_deny_packet_destination_ip = packet[12:16]
+        dns_deny_packet_source_ip = packet[16:20]
+
+        # Pack bytes 12-20 (source and destination IP)
+        dns_deny_packet_to_send += dns_deny_packet_source_ip
+        dns_deny_packet_to_send += dns_deny_packet_destination_ip
+
+        ##### UDP HEADER
+        # Copy bytes 20-28 (source/destination port, length, checksum)
+        dns_deny_packet_to_send += packet[20:28] 
+ 
+        ##### DNS HEADER (starting at byte 28)
+        # Copy bytes 28-30 (ID field)
+        dns_deny_packet_to_send += packet[28:30]
+
+        # For bytes 30-32, leave everything the same, except change first bit (QR bit) to 1
+        option_bits = struct.unpack('!H', packet[30:32])[0]
+        option_bits = 0x8000 | option_bits
+        dns_deny_packet_to_send += struct.pack('!H', option_bits)
+
+        # Copy bytes 32-34 (QDCOUNT)
+        dns_deny_packet_to_send += packet[32:34]
+
+        # Pack the value 1 for bytes 34-36 (ANCOUNT)
+        dns_deny_packet_to_send += struct.pack('!H', 1)
+
+        # Copy bytes 36-(q_type_offset)
+        dns_deny_packet_to_send += packet[36:40]
+        dns_deny_packet_to_send += packet[40:q_type_offset]
+
+        # Pack the value 1 (QTYPE) for bytes (q_type_offset -> q_type_offset+2)
+        dns_deny_packet_to_send += struct.pack('H', 1)
+        # Pack the value 1 (QCLASS) for bytes (q_type_offset+2 -> q_type_offset+4)
+        dns_deny_packet_to_send += struct.pack('H', 1)
+
+        # Copy fields QNAME, QTYPE, QCLASS into answer section
+        dns_deny_packet_to_send += dns_deny_packet_to_send[40:] 
+
+        # Pack TTL of 1 (four bytes)
+        dns_deny_packet_to_send += struct.pack('!L', 1)
+        # Pack RDLENGTH (two bytes)
+        dns_deny_packet_to_send += struct.pack('!H', 4)
+        # Pack IP address into RDATA field (4 bytes)
+        dns_deny_packet_to_send += socket.inet_aton('54.173.224.150')
+
+        return dns_deny_packet_to_send
 
     def generate_reset_packet(self, packet):
 
