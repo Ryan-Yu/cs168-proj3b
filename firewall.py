@@ -594,13 +594,13 @@ class Firewall:
 
                     # Generate the RST packet, and send it, given direction
                     reset_packet_to_send = self.generate_reset_packet(packet)
-                    self.iface_int.send_ip_packet(reset_packet_to_send)
-                    '''
+                    #self.iface_int.send_ip_packet(reset_packet_to_send)
+                    
                     if pkt_dir == PKT_DIR_INCOMING:
                         self.iface_ext.send_ip_packet(reset_packet_to_send)
                     elif pkt_dir == PKT_DIR_OUTGOING:
                         self.iface_int.send_ip_packet(reset_packet_to_send)
-                    '''
+                    
                     print("We sent a reset packet, so another one shouldn't be generated") 
         return pass_packet_through 
     
@@ -742,26 +742,17 @@ class Firewall:
 
 
     def generate_reset_packet(self, packet):
-        # Need destination_ip, destination_port, ipv4 header length 
-        # Need to set RST flag to 1
 
         reset_packet_to_send = ""
         ip_header_length = ord(packet[0:1]) & 0x0f
-        
-        #our_packet_checksum = self.calculate_checksum2(ip_header_length * 4, packet)
-        #print("OUR checksum is %s" % our_packet_checksum)
+        ip_header_length = ip_header_length * 4
 
         packet_total_length = struct.unpack('!H', packet[2:4])[0]
-
-
-        #our_tcp_checksum = self.calculate_tcp_checksum2(packet_total_length, ip_header_length * 4, packet) 
-        #print("Our tcp checksum: %s" % our_tcp_checksum)
 
         # Pack first 2 bytes of IP header
         reset_packet_to_send += packet[0:2]
         
         # Pack total length into IP header
-        #reset_packet_to_send += packet[2:4]
         reset_packet_to_send += (struct.pack('!H', 40))
         
         reset_packet_to_send += packet[4:6]
@@ -779,12 +770,9 @@ class Firewall:
         reset_packet_to_send += reset_packet_source_ip
         reset_packet_to_send += reset_packet_destination_ip
 
-        ##### TODO: Might need to add more stuff in the IP section of the packet,
-        ##### depending on whether the length is 20 or variable
-
         ########## TCP header ##########
-        reset_packet_destination_port = packet[(ip_header_length + 2):(ip_header_length + 4)]
-        reset_packet_source_port = packet[(ip_header_length):(ip_header_length + 2)]
+        reset_packet_source_port = packet[(ip_header_length + 2):(ip_header_length + 4)]
+        reset_packet_destination_port = packet[(ip_header_length):(ip_header_length + 2)]
 
         # Pack packet source and destination ports
         # Bytes 20-22
@@ -792,7 +780,8 @@ class Firewall:
         # Bytes 22-24
         reset_packet_to_send += reset_packet_destination_port
 
-        previous_sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
+        previous_sequence_number = struct.unpack('!L', packet[24:28])[0]
+       
         new_sequence_number = 0
 
         # Increase sequence number by 1 and pack it
@@ -805,14 +794,13 @@ class Firewall:
 
         # Bytes 32-33
         reset_packet_to_send += struct.pack('!B', 0x50)
-        # reset_packet_to_send += packet[(ip_header_length + 12):(ip_header_length + 13)]
 
         # Pack flags into 1 byte, with ACK and RST flags turned on
         # Bytes 33-34
         reset_packet_to_send += struct.pack('!B', 0x14)
 
         # Bytes 34-36
-        reset_packet_to_send += packet[(ip_header_length + 14):(ip_header_length + 16)]
+        reset_packet_to_send += struct.pack('!H', 0)
 
         # Pad bytes 36-38 with zeros
         reset_packet_to_send += (struct.pack('!H', 0))
@@ -830,6 +818,7 @@ class Firewall:
 
         return reset_packet_to_send
 
+    
     def calculate_tcp_checksum(self, total_length, ip_header_length, packet):
         total_len = struct.unpack('!H', packet[2:4])[0]
         header_len = (struct.unpack('!B', packet[0:1])[0] & 0x0F) * 4
@@ -867,7 +856,6 @@ class Firewall:
         checksum += (checksum >> 16)
         checksum = ~checksum & 0xFFFF
 
-        print("Github TCP checksum: %s" % checksum)
         return checksum       
 
     def calculate_tcp_checksum2(self, total_length, ip_header_length, packet):
@@ -934,7 +922,6 @@ class Firewall:
 
         orig_chksum = struct.unpack('!H', packet[10:12])[0]
 
-        print("IP Checksum by github guy is: %s" % checksum)
         return checksum
 
 
