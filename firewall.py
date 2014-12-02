@@ -71,6 +71,21 @@ class DNSRule:
         string_repres += "Verdict: %s\n" % self.verdict
         return string_repres
 
+
+class HTTPRule:
+    def __init__(self, hostname, hostname_type):
+        # Hostname can be an IP address, wildcard domain name, or exact match domain name, (or alternatively, just a *)
+        self.hostname = hostname
+        # IP, WILDCARD, EXACT, ANY
+        self.hostname_type = hostname_type
+
+    def __str__(self):
+        string_repres = "\nHTTPRule --\n"
+        string_repres += "Hostname: %s\n" % self.hostname
+        string_repres += "Hostname type: %s\n" % self.hostname_type
+        return string_repres
+
+
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
@@ -90,6 +105,8 @@ class Firewall:
         self.udp_rules_list = []
         self.tcp_rules_list = []
         self.icmp_rules_list = []
+        self.http_rules_list = []
+
 
         self.initialize_all_maps(self.rules_file)
 
@@ -105,6 +122,9 @@ class Firewall:
         for icmp_rule in self.icmp_rules_list:
             print(icmp_rule)
         
+        for http_rule in self.http_rules_list:
+            print(http_rule)
+
 
     def initialize_all_maps(self, rules_file):
        
@@ -140,7 +160,7 @@ class Firewall:
                        self.udp_rules_list.append(new_dns_rule)
                     
                    elif (current_verdict == "DENY"):
-                       new_dns_rule = DNSRUle(current_domain[1:], "WILDCARD", "DENY")
+                       new_dns_rule = DNSRule(current_domain[1:], "WILDCARD", "DENY")
                        self.udp_rules_list.append(new_dns_rule)
                    # current verdict is DROP, so we set value to False
                    else:
@@ -295,7 +315,28 @@ class Firewall:
                 # Initialize new ICMP rule and append it to our ICMP rules list
                 new_icmp_rule = ICMPRule(declared_ip_lower_bound, declared_ip_upper_bound, icmp_type, current_verdict, declared_country_code)
                 self.icmp_rules_list.append(new_icmp_rule)
+            
+            ########## Handle HTTP LOG rule ##########
+            elif (current_protocol == "HTTP"):
+                hostname = split_line[2]
 
+                # hostname is *
+                if (hostname == '*'):
+                    new_http_rule = HTTPRule(hostname, "ANY")
+
+                # hostname is IP address
+                elif (hostname.translate(None, '.').isdigit()):
+                    new_http_rule = HTTPRule(hostname, "IP")
+
+                # hostname is wild card domain
+                elif (hostname.startswith('*')):
+                    new_http_rule = HTTPRule(hostname, "WILDCARD")
+
+                # hostname is exact domain
+                else:
+                    new_http_rule = HTTPRule(hostname, "EXACT")
+                
+                self.http_rules_list.append(new_http_rule)
 
 
     '''
@@ -452,6 +493,7 @@ class Firewall:
         #######################################
 
         elif (packet_protocol_number == 6):
+            print("At top")
             # Look at TCP rules list and determine whether TCP packet should be dropped
             
             # pkt[byte_offset:(byte_offset + 2)] returns String representing source port
@@ -474,10 +516,31 @@ class Firewall:
 
             send_packet = self.make_decision_on_tcp_packet(pkt_dir, external_ip, external_port, internal_ip, internal_port, pkt)                
             if send_packet:
+                print("At middle") 
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
+                    
+                    if (external_port == 80):
+                        # Since direction is incoming, we know that the TCP options in this packet correspond to a HTTP RESPONSE
+
+                        # If external port is 80, then we parse bytestream and then use fields in parsed bytestream to check HTTP rules list,
+                        # and then decide whether we need to log the HTTP request/response
+                        print("About to generate HTTP message") 
+                        # TCP options start at: Length of packet - ip header length - TCP header length
+                        self.generate_http_message(pkt)
+
+
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
+                 
+                    if (external_port == 80):
+                        # since direction is incoming, we know that the TCP optinos in this packet correspond to a HTTP REQUEST
+
+                        # If external port is 80, then we parse bytestream and then use fields in parsed bytestream to check HTTP rules list,
+                        # and then decide whether we need to log the HTTP request/response
+
+                        self.generate_http_message(pkt)
+
                 #print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
@@ -517,6 +580,20 @@ class Firewall:
             elif pkt_dir == PKT_DIR_OUTGOING:
                 self.iface_ext.send_ip_packet(pkt)
         
+
+    '''
+    '''
+    def generate_http_message(self, packet):
+
+        ip_header_length = ord(packet[0:1]) & 0x0f
+        ip_header_length = ip_header_length * 4
+        options_offset = len(packet) - ip_header_length - 20
+        print("Options offset: %s" % options_offset)
+
+        sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
+        print("sequence number: %s" % sequence_number) 
+        
+
 
     '''
     Returns true if the ICMP packet with destination_ip and icmp_type should be passed, and false if it should be dropped
@@ -672,11 +749,8 @@ class Firewall:
                                 pass_packet_through = False
                                 # Only generate DNS deny packet if q_type == 1 (we ignore when q_type is 28)
                                 if (q_type == 1):
-                                    print("I am about to make a DNS packet!!")
                                     dns_deny_packet = self.generate_a_dns_deny_packet(packet, q_type_offset)
-                                    print("a DNS deny packet was just generated!")
                                     self.iface_int.send_ip_packet(dns_deny_packet)
-                                    print("sent a DNS deny packet") 
                     # Wild card matches
                     else:  
                         # If we've matched our wild card
@@ -728,7 +802,6 @@ class Firewall:
 
 
     def generate_a_dns_deny_packet(self, packet, q_type_offset):
-        print("Top of generate dns deny packet")
         dns_deny_packet_to_send = ""
         ip_header_length = ord(packet[0:1]) & 0x0f
         ip_header_length = ip_header_length * 4
@@ -804,15 +877,12 @@ class Firewall:
         dns_deny_packet_to_send += struct.pack('!H', 1)
         dns_deny_packet_to_send += struct.pack('!H', 1)
 
-
-
         # Pack TTL of 1 (four bytes)
         dns_deny_packet_to_send += struct.pack('!L', 1)
         # Pack RDLENGTH (two bytes)
         dns_deny_packet_to_send += struct.pack('!H', 4)
         # Pack IP address into RDATA field (4 bytes)
         dns_deny_packet_to_send += socket.inet_aton('54.173.224.150')
-
         
         udp_length = len(dns_deny_packet_to_send) - 20
         dns_deny_packet_to_send = dns_deny_packet_to_send[0:24] + struct.pack('!H', udp_length) + dns_deny_packet_to_send[26:]
@@ -820,18 +890,14 @@ class Firewall:
         length_of_packet = len(dns_deny_packet_to_send)
         dns_deny_packet_to_send = dns_deny_packet_to_send[0:2] + struct.pack('!H', length_of_packet) + dns_deny_packet_to_send[4:]
        
-
-
         ip_checksum = struct.pack('!H', self.calculate_checksum(20, dns_deny_packet_to_send))
         dns_deny_packet_to_send = dns_deny_packet_to_send[0:10] + ip_checksum + dns_deny_packet_to_send[12:]
 
         udp_checksum = struct.pack('!H', self.calculate_tcp_checksum(0, 20, dns_deny_packet_to_send))
         dns_deny_packet_to_send = dns_deny_packet_to_send[0:26] + udp_checksum + dns_deny_packet_to_send[28:]
-        print("Bottom of generate dns deny packet")
         return dns_deny_packet_to_send
 
     def generate_reset_packet(self, packet):
-        print("About to generate a RST packet")
         reset_packet_to_send = ""
         ip_header_length = ord(packet[0:1]) & 0x0f
         ip_header_length = ip_header_length * 4
@@ -897,8 +963,8 @@ class Firewall:
         # At this point, bytes 10-12 and 36-38 have been packed with zeros
 
         # Calculate IP checksum and pack
-        
-        reset_packet_checksum = struct.pack('!H', self.calculate_checksum(ip_header_length * 4, reset_packet_to_send))
+       
+        reset_packet_checksum = struct.pack('!H', self.calculate_checksum(ip_header_length, reset_packet_to_send))
         reset_packet_to_send = reset_packet_to_send[0:10] + reset_packet_checksum + reset_packet_to_send[12:]
 
         # Calculate TCP checksum and pack
@@ -996,28 +1062,10 @@ class Firewall:
         return decimal_final_checksum
 
 
-
-    def calculate_checksum(self, ipv4_header_length, packet):
-        nleft = header_len = (struct.unpack('!B', packet[0:1])[0] & 0x0F) * 4
-        checksum = 0
-
-        while nleft > 1:
-            if nleft != 12:
-                checksum += struct.unpack('!H', packet[nleft - 2:nleft])[0]
-            nleft -= 2
-        checksum = (checksum >> 16) + (checksum & 0xFFFF)
-        checksum += (checksum >> 16)
-        checksum = (~checksum) & 0xFFFF
-
-        orig_chksum = struct.unpack('!H', packet[10:12])[0]
-
-        return checksum
-
-
     '''
     Calculates a new checksum (in decimal) based off of an IPv4 header, and a header_length (given in bytes)
     '''
-    def calculate_checksum2(self, ipv4_header_length, packet):
+    def calculate_checksum(self, ipv4_header_length, packet):
         
         byte_counter = 0
         total_sum = 0
@@ -1031,21 +1079,61 @@ class Firewall:
             total_sum += struct.unpack('!H', packet[byte_counter:(byte_counter + 2)])[0]    
             byte_counter += 2
         
+        leftmost_four_bits = total_sum >> 16
+        final_segment = total_sum & 0xFFFF
+        
+        total_sum = leftmost_four_bits + final_segment
+
+        total_sum += (total_sum >> 16)
+
+        # Flip bits
+        total_sum = (~total_sum)
+        total_sum = total_sum & 0xFFFF
+
+        return total_sum 
+
+
+
+        '''
+        print("My total sum in decimal: %s" % total_sum)
+        print("Total sum in binary: %s" % bin(total_sum))
+        
         # Extract first four bits of our sum as a binary string
         first_four_bits = bin(total_sum)[:6]
 
         # Isolate the remainder of our sum as a binary string
         final_segment = bin(total_sum)[6:]
         final_segment = '0b%s' % final_segment
+        number_of_zeros_to_pad = 0
+        for i in range(2, len(final_segment) - 2):
+            if final_segment[i] == '0':
+                number_of_zeros_to_pad += 1
+            else:
+                break
+       
+        print("number of zeros to pad: %s" % number_of_zeros_to_pad)
 
         # Add the carry and the remainder
         summed_segment = bin(int(first_four_bits, 2) + int(final_segment, 2))
+
+        print("summed segment: %s" % summed_segment)
+
+        # Pad our pre-flipped checksum
+        padded_summed_segment = '0b'
+        while number_of_zeros_to_pad > 0:
+            padded_summed_segment += '0'
+            number_of_zeros_to_pad -= 1
        
+        for i in range (2, len(summed_segment)):
+            padded_summed_segment += summed_segment[i]
+
+        print("padded summed segment: %s" % padded_summed_segment)
+
         # Flip all bits in summed_segment
         final_checksum = '0b'
         index = 2
-        while (index < len(summed_segment)):
-            if (summed_segment[index] == '0'):
+        while (index < len(padded_summed_segment)):
+            if (padded_summed_segment[index] == '0'):
                 final_checksum += '1'
             else:
                 final_checksum += '0'
@@ -1053,6 +1141,8 @@ class Firewall:
   
         decimal_final_checksum = int(final_checksum, 2)
         return decimal_final_checksum
+        '''
+
 
 
     '''
