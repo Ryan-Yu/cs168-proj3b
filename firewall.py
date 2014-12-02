@@ -493,7 +493,6 @@ class Firewall:
         #######################################
 
         elif (packet_protocol_number == 6):
-            print("At top")
             # Look at TCP rules list and determine whether TCP packet should be dropped
             
             # pkt[byte_offset:(byte_offset + 2)] returns String representing source port
@@ -516,7 +515,6 @@ class Firewall:
 
             send_packet = self.make_decision_on_tcp_packet(pkt_dir, external_ip, external_port, internal_ip, internal_port, pkt)                
             if send_packet:
-                print("At middle") 
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
                     
@@ -593,17 +591,27 @@ class Firewall:
 
     '''
     '''
-    def update_http_message(self, packet, message_type, http_message_object):
-
-        # message_type is either 'RESPONSE' or 'REQUEST'
+    def update_http_message(self, packet, message_type):
 
         ip_header_length = ord(packet[0:1]) & 0x0f
         ip_header_length = ip_header_length * 4
-        options_offset = len(packet) - ip_header_length - 20
-        print("Options offset: %s" % options_offset)
-
+        
         sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
-        print("sequence number: %s" % sequence_number) 
+        
+        # message_type is either 'RESPONSE' or 'REQUEST'
+        print("\n----- New packet has arrived with sequence number %s! ------" % sequence_number)
+
+        tcp_header_length = ord(packet[(ip_header_length + 12):(ip_header_length + 13)]) >> 4
+        tcp_header_length = tcp_header_length * 4
+
+        length_of_packet = struct.unpack('!H', packet[2:4])[0]
+        payload_length = length_of_packet - ip_header_length - tcp_header_length
+        
+        print("Length of packet: %s; IP header length: %s; TCP header length: %s; Length of payload: %s" % (length_of_packet, ip_header_length, tcp_header_length, payload_length))
+
+        options_offset = ip_header_length + tcp_header_length
+        print("----- HTTP Payload: \n")
+        print(packet[options_offset:])
 
         '''
         Each packet that gets passed into this method is potentially a fragment of the current TCP message (i.e. HTTP request or response)
