@@ -527,8 +527,16 @@ class Firewall:
                         # and then decide whether we need to log the HTTP request/response
                         print("About to generate HTTP message") 
                         # TCP options start at: Length of packet - ip header length - TCP header length
-                        self.generate_http_message(pkt)
+                        
+                        
+                        # Check <5-tuple -> HTTPObject> map, if 5-tuple is not in the map, then message = new HTTPObject.
+                        # If 5-tuple IS in the map, then message = map.get(5-tuple)
+                        # Pass message into update_http_message function call
+                        # In the update_http_message function call, we will determine whether we need to append to this message,
+                        # based on the packet's sequence number, and the sequence number that we next expect
+                        self.update_http_message(pkt, "RESPONSE")
 
+                        
 
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
@@ -539,7 +547,9 @@ class Firewall:
                         # If external port is 80, then we parse bytestream and then use fields in parsed bytestream to check HTTP rules list,
                         # and then decide whether we need to log the HTTP request/response
 
-                        self.generate_http_message(pkt)
+                        
+
+                        self.update_http_message(pkt, "REQUEST")
 
                 #print("SENT TCP PACKET")
             else:
@@ -583,7 +593,9 @@ class Firewall:
 
     '''
     '''
-    def generate_http_message(self, packet):
+    def update_http_message(self, packet, message_type, http_message_object):
+
+        # message_type is either 'RESPONSE' or 'REQUEST'
 
         ip_header_length = ord(packet[0:1]) & 0x0f
         ip_header_length = ip_header_length * 4
@@ -592,7 +604,28 @@ class Firewall:
 
         sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
         print("sequence number: %s" % sequence_number) 
+
+        '''
+        Each packet that gets passed into this method is potentially a fragment of the current TCP message (i.e. HTTP request or response)
+        Determine if packet contains HTTP REQUEST or RESPONSE
         
+        3-situations, based on the packet's sequence number:
+        (note that sequence numbers can wrap around)
+        (1) seq_no > sequence number that we expect:
+            drop the packet
+        (2) seq_no == sequence number that we expect:
+            parse this packet's HTTP request or response, and append to our http_message_object
+            
+            After this append, check for completion of our message object's request and response:
+             
+            If both the HTTP request and response are done, then:
+                Look at the request's hostname, and look at our HTTPRules list. Determine from the rules list whether we need to log this HTTP Request/Response
+            Else:
+                return 
+
+        (3) seq_no < sequence number that we expect:
+            pass the packet through without appending
+        '''
 
 
     '''
