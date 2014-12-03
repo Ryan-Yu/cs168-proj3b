@@ -87,17 +87,11 @@ class HTTPRule:
 
 
 class HTTPConnection:
-    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, host_name="", method="", path="", version="", status_code="", object_size="", expected_request_seq_no=None, expected_response_seq_no=None):
+    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, expected_request_seq_no=None, expected_response_seq_no=None):
         self.unparsed_request = unparsed_request
         self.unparsed_response = unparsed_response
         self.is_request_complete = is_request_complete
         self.is_response_complete = is_response_complete
-        self.host_name = host_name
-        self.method = method
-        self.path = path
-        self.version = version
-        self.status_code = status_code
-        self.object_size = object_size
         self.expected_request_seq_no = expected_request_seq_no
         self.expected_response_seq_no = expected_response_seq_no
 
@@ -112,7 +106,6 @@ class HTTPConnection:
         string_repres += "Unparsed request: %s\n" % self.unparsed_request
         string_repres += "Unparsed response: %s\n" % self.unparsed_response
         string_repres += "Is message complete? %s\n" % (self.is_request_complete and self.is_response_complete)
-        string_repres += "LOG message: (%s, %s, %s, %s, %s, %s)" % (self.host_name, self.method, self.path, self.version, self.status_code, self.object_size)
         return string_repres
 
 
@@ -573,11 +566,14 @@ class Firewall:
                             http_connection = HTTPConnection()
                             self.http_connections_map[five_tuple] = http_connection
                         send_packet_or_not = self.update_http_message(pkt, "RESPONSE", http_connection, five_tuple)
+                       
+                        #self.iface_int.send_ip_packet(pkt)
                         
                         if (send_packet_or_not):
                             self.iface_int.send_ip_packet(pkt)
-
-                        self.write_to_log_file(http_connection)
+                        
+                        if (http_connection.is_request_complete and http_connection.is_response_complete):
+                            self.write_to_log_file(http_connection, external_ip)
 
                     # External port is not 80, so just send the packet through
                     else:
@@ -604,11 +600,15 @@ class Firewall:
                             self.http_connections_map[five_tuple] = http_connection
                         send_packet_or_not = self.update_http_message(pkt, "REQUEST", http_connection, five_tuple)
                         
+                        #self.iface_ext.send_ip_packet(pkt)
+                        
                         if (send_packet_or_not):
                             self.iface_ext.send_ip_packet(pkt)
-
-                        self.write_to_log_file(http_connection)
-
+                        
+                        if (http_connection.is_request_complete and http_connection.is_response_complete):
+                            self.write_to_log_file(http_connection, external_ip)
+                    else:
+                        self.iface_ext.send_ip_packet(pkt)
                 #print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
@@ -649,9 +649,99 @@ class Firewall:
                 self.iface_ext.send_ip_packet(pkt)
         
 
+    '''
+    Parses the unparsed HTTP request and HTTP response variables in http_connection, and writes them to the log file
+    '''
+    def write_to_log_file(self, http_connection, external_ip):
 
-    def write_to_log_file(self, http_connection):
-        pass
+        line_to_write_to_file = ""
+
+        # If request contains "Host:", then hostname is a domain name; else, it is the external IP address
+        if http_connection.unparsed_request.find("Host: ") != -1:
+            index_of_host_field = http_connection.unparsed_request.index("Host: ")
+            hostname = ""
+            index_of_host_field += 6
+            hostname_is_ip_address = False
+            while (http_connection.unparsed_request[index_of_host_field] != '\n'):
+                hostname += http_connection.unparsed_request[index_of_host_field]
+                index_of_host_field += 1
+            hostname = hostname.strip()
+            print("Hostname: %s" % hostname)
+        else:
+            hostname = external_ip
+            hostname_is_ip_address = True
+
+        # Check rules list, and see whether the current request/response should be logged
+        if self.make_decision_on_http_logging(hostname, hostname_is_ip_address):
+            # hostname, method, path, version, status_code, object_size
+            line_to_write_to_file += hostname
+            line_to_write_to_file += " "
+            
+            delimited_request = http_connection.unparsed_request.split('\n')
+            delimited_response = http_connection.unparsed_response.split('\n')
+            
+            method = delimited_request[0].split(' ')[0]
+            line_to_write_to_file += method.strip()
+            line_to_write_to_file += " "
+
+            path = delimited_request[0].split(' ')[1]
+            line_to_write_to_file += path.strip()
+            line_to_write_to_file += " "
+
+            version = delimited_request[0].split(' ')[2]
+            line_to_write_to_file += version.strip()
+            line_to_write_to_file += " "
+
+            status_code = delimited_response[0].split(' ')[1]
+            line_to_write_to_file += status_code.strip()
+            line_to_write_to_file += " "
+
+            if http_connection.unparsed_response.find("Content-Length: ") != -1:
+                index_of_content_length_field = http_connection.unparsed_response.index("Content-Length: ")
+                content_length = ""
+                index_of_content_length_field += 15
+                while (http_connection.unparsed_response[index_of_content_length_field] != '\n'):
+                    content_length += http_connection.unparsed_response[index_of_content_length_field]
+                    index_of_content_length_field += 1
+                content_length = content_length.strip()
+            else:
+                content_length = '-1'
+
+            line_to_write_to_file += content_length
+            line_to_write_to_file += " "
+            
+            print("Line to write: %s" % line_to_write_to_file)
+
+
+    
+    '''
+    Given the HTTP LOG rules, returns True if the given hostname should be logged, and False otherwise
+    (Note: the hostname can either be a domain or an IP address)
+    '''
+    def make_decision_on_http_logging(self, hostname, is_ip_address):
+        for http_rule in self.http_rules_list:
+            if (http_rule.hostname_type == "IP"):
+                if not is_ip_address:
+                    continue
+                elif hostname == http_rule.hostname:
+                    return True
+
+            elif (http_rule.hostname_type == "WILDCARD"):
+                if is_ip_address:
+                    continue
+                elif (http_rule.hostname.endswith(hostname)):
+                    return True
+
+            elif (http_rule.hostname_type == "EXACT"):
+                if is_ip_address:
+                    continue
+                elif (http_rule.hostname == hostname):
+                    return True
+
+            elif (http_rule.hostname_type == "ANY"):
+                return True
+
+        return False
 
 
 
