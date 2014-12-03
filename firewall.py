@@ -549,7 +549,6 @@ class Firewall:
             if send_packet:
                 
                 if pkt_dir == PKT_DIR_INCOMING:
-                    self.iface_int.send_ip_packet(pkt)
                     
                     if (external_port == 80):
                         # Since direction is incoming, we know that the TCP options in this packet correspond to a HTTP RESPONSE
@@ -573,12 +572,19 @@ class Firewall:
                         if http_connection is None:
                             http_connection = HTTPConnection()
                             self.http_connections_map[five_tuple] = http_connection
-                        self.update_http_message(pkt, "RESPONSE", http_connection, five_tuple)
+                        send_packet_or_not = self.update_http_message(pkt, "RESPONSE", http_connection, five_tuple)
+                        
+                        if (send_packet_or_not):
+                            self.iface_int.send_ip_packet(pkt)
 
+                        self.write_to_log_file(http_connection)
+
+                    # External port is not 80, so just send the packet through
+                    else:
+                        self.iface_int.send_ip_packet(pkt)
                          
 
                 elif pkt_dir == PKT_DIR_OUTGOING:
-                    self.iface_ext.send_ip_packet(pkt)
                  
                     if (external_port == 80):
                         # since direction is incoming, we know that the TCP optinos in this packet correspond to a HTTP REQUEST
@@ -596,7 +602,12 @@ class Firewall:
                         if http_connection is None:
                             http_connection = HTTPConnection()
                             self.http_connections_map[five_tuple] = http_connection
-                        self.update_http_message(pkt, "REQUEST", http_connection, five_tuple)
+                        send_packet_or_not = self.update_http_message(pkt, "REQUEST", http_connection, five_tuple)
+                        
+                        if (send_packet_or_not):
+                            self.iface_ext.send_ip_packet(pkt)
+
+                        self.write_to_log_file(http_connection)
 
                 #print("SENT TCP PACKET")
             else:
@@ -637,6 +648,12 @@ class Firewall:
             elif pkt_dir == PKT_DIR_OUTGOING:
                 self.iface_ext.send_ip_packet(pkt)
         
+
+
+    def write_to_log_file(self, http_connection):
+        pass
+
+
 
     '''
     Given a http_connection and a packet whose HTTP payload MAY need to be appended to this http_connection
@@ -765,9 +782,10 @@ class Firewall:
 
         # At this point, our http_connection's unparsed request/response are both complete
         if (http_connection.is_request_complete and http_connection.is_response_complete):
-            print("##### HTTP CONNECTION: #####\n: %s" % http_connection)
-            del self.http_connections_map[tuple_id] 
+           print("##### HTTP CONNECTION: #####\n: %s" % http_connection)
 
+
+        return True
         
 
     '''
