@@ -810,22 +810,30 @@ class Firewall:
             if payload_length > 0 and not http_connection.is_request_complete:
                 # If this packet is the first packet in the HTTP request...
                 if http_connection.expected_request_seq_no is None:
-                    # ...then set our next expected sequence number to this packet's sequence number + 1
-                    http_connection.expected_request_seq_no = sequence_number + payload_length
-                    # Append payload byte by byte. After every append, check the last 2? bytes to see if we've reached the end of our HTTP request
-                    # Begin appending starting at the beginning of the HTTP payload
-                    counter = options_offset
-                    while (counter < length_of_packet):
-                        byte_to_append = packet[counter:(counter + 1)]
-                        http_connection.append_to_unparsed_request(byte_to_append)
-                        # Check the last four bytes of unparsed request to see if we're finished... if it has four or more bytes to begin with
-                        if (len(http_connection.unparsed_request) >= 4):
-                            # Check whether last four characters of unparsed request are \r\n\r\n; if so, we break because we're done appending
-                            if (http_connection.unparsed_request[-4:] == '\r\n\r\n'):
-                                http_connection.is_request_complete = True
-                                break
-                        counter += 1
-                
+                    # Make sure that the HTTP Request is valid. Only append if valid                    
+                    if (packet[options_offset:(options_offset + 3)] == "GET") or (packet[options_offset:(options_offset + 3)] == "PUT") \
+                        or (packet[options_offset:(options_offset + 4)] == "POST") or (packet[options_offset:(options_offset + 4)] == "DROP"):
+
+                        
+                        # ...then set our next expected sequence number to this packet's sequence number + 1
+                        http_connection.expected_request_seq_no = sequence_number + payload_length
+                        # Append payload byte by byte. After every append, check the last 2? bytes to see if we've reached the end of our HTTP request
+                        # Begin appending starting at the beginning of the HTTP payload
+                        counter = options_offset
+                        while (counter < length_of_packet):
+                            byte_to_append = packet[counter:(counter + 1)]
+                            http_connection.append_to_unparsed_request(byte_to_append)
+                            # Check the last four bytes of unparsed request to see if we're finished... if it has four or more bytes to begin with
+                            if (len(http_connection.unparsed_request) >= 4):
+                                # Check whether last four characters of unparsed request are \r\n\r\n; if so, we break because we're done appending
+                                if (http_connection.unparsed_request[-4:] == '\r\n\r\n'):
+                                    http_connection.is_request_complete = True
+                                    break
+                            counter += 1
+                    else:
+                        # Simply pass the packet through if the packet's HTTP payload is not a valid HTTP request
+                        return True
+                    
                 # Current packet's HTTP payload is NOT the first packet in the HTTP request
                 else:
                     # Check sequence number of this packet to find out what to do with its payload...
@@ -858,17 +866,22 @@ class Firewall:
         elif (message_type == "RESPONSE"):
             if payload_length > 0 and not http_connection.is_response_complete:
                 if http_connection.expected_response_seq_no is None:
-                    http_connection.expected_response_seq_no = sequence_number + payload_length
-                    counter = options_offset
-                    while (counter < length_of_packet):
-                        byte_to_append = packet[counter:(counter + 1)]
-                        http_connection.append_to_unparsed_response(byte_to_append)
-                        if (len(http_connection.unparsed_response) >= 4):
-                            if (http_connection.unparsed_response[-4:] == '\r\n\r\n'):
-                                http_connection.is_response_complete = True
-                                print("response has been marked as complete")
-                                break
-                        counter += 1
+                    # Drop the packet if it is not a valid first packet in the HTTP Response
+                    if packet[options_offset:(options_offset + 4)] == "HTTP":
+                        http_connection.expected_response_seq_no = sequence_number + payload_length
+                        counter = options_offset
+                        while (counter < length_of_packet):
+                            byte_to_append = packet[counter:(counter + 1)]
+                            http_connection.append_to_unparsed_response(byte_to_append)
+                            if (len(http_connection.unparsed_response) >= 4):
+                                if (http_connection.unparsed_response[-4:] == '\r\n\r\n'):
+                                    http_connection.is_response_complete = True
+                                    print("response has been marked as complete")
+                                    break
+                            counter += 1
+                    else:
+                        return True
+
                 else:
                     if (sequence_number > http_connection.expected_response_seq_no):
                         print("Out of order packet! Drop it!")
@@ -876,6 +889,9 @@ class Firewall:
                     elif (sequence_number < http_connection.expected_response_seq_no):
                         return True
                     elif (sequence_number == http_connection.expected_response_seq_no):
+                        
+                        print("-------------------- CORRECT SEQUENCE NUMBER ON A FRAGMENTATION")
+                        
                         http_connection.expected_response_seq_no += payload_length
                         counter = options_offset
                         while (counter < length_of_packet):
