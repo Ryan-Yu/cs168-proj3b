@@ -87,13 +87,14 @@ class HTTPRule:
 
 
 class HTTPConnection:
-    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, expected_request_seq_no=None, expected_response_seq_no=None):
+    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, expected_request_seq_no=None, expected_response_seq_no=None, is_connection_written=False):
         self.unparsed_request = unparsed_request
         self.unparsed_response = unparsed_response
         self.is_request_complete = is_request_complete
         self.is_response_complete = is_response_complete
         self.expected_request_seq_no = expected_request_seq_no
         self.expected_response_seq_no = expected_response_seq_no
+        self.is_connection_written = is_connection_written
 
     def append_to_unparsed_request(self, string_to_append):
         self.unparsed_request += string_to_append
@@ -137,6 +138,7 @@ class Firewall:
         ########## Initialize HTTP connections map ##########
 
         self.http_connections_map = {}
+        self.logging_file = open('http.log', 'a')
 
         for udp_rule in self.udp_rules_list:
             print(udp_rule)
@@ -355,7 +357,7 @@ class Firewall:
 
                 # hostname is wild card domain
                 elif (hostname.startswith('*')):
-                    new_http_rule = HTTPRule(hostname, "WILDCARD")
+                    new_http_rule = HTTPRule(hostname[1:], "WILDCARD")
 
                 # hostname is exact domain
                 else:
@@ -607,6 +609,8 @@ class Firewall:
                         
                         if (http_connection.is_request_complete and http_connection.is_response_complete):
                             self.write_to_log_file(http_connection, external_ip)
+                            # Delete the current 5-tuple to make room for all of the other Request/Response pairs in this HTTP connection
+                            del self.http_connections_map[five_tuple]
                     else:
                         self.iface_ext.send_ip_packet(pkt)
                 #print("SENT TCP PACKET")
@@ -653,7 +657,6 @@ class Firewall:
     Parses the unparsed HTTP request and HTTP response variables in http_connection, and writes them to the log file
     '''
     def write_to_log_file(self, http_connection, external_ip):
-
         line_to_write_to_file = ""
 
         # If request contains "Host:", then hostname is a domain name; else, it is the external IP address
@@ -673,6 +676,7 @@ class Firewall:
 
         # Check rules list, and see whether the current request/response should be logged
         if self.make_decision_on_http_logging(hostname, hostname_is_ip_address):
+            print("-=---------TOP OF MAKE DECISION IF STATEMENT")
             # hostname, method, path, version, status_code, object_size
             line_to_write_to_file += hostname
             line_to_write_to_file += " "
@@ -708,9 +712,16 @@ class Firewall:
                 content_length = '-1'
 
             line_to_write_to_file += content_length
-            line_to_write_to_file += " "
-            
-            print("Line to write: %s" % line_to_write_to_file)
+            line_to_write_to_file += '\n'
+           
+            print("*******THE LINE THAT WE'RE about to write is: %s" % line_to_write_to_file)
+
+            if not http_connection.is_connection_written:
+                print("------------JUST WROTE THE LINE ABOVE")
+                logging_file = open('http.log', 'a')
+                logging_file.write(line_to_write_to_file)
+                logging_file.flush()
+                http_connection.is_connection_written = True
 
 
     
@@ -719,6 +730,9 @@ class Firewall:
     (Note: the hostname can either be a domain or an IP address)
     '''
     def make_decision_on_http_logging(self, hostname, is_ip_address):
+        
+        print("##### About to make a decision on http logging for hostname: %s" % hostname)
+
         for http_rule in self.http_rules_list:
             if (http_rule.hostname_type == "IP"):
                 if not is_ip_address:
@@ -729,7 +743,7 @@ class Firewall:
             elif (http_rule.hostname_type == "WILDCARD"):
                 if is_ip_address:
                     continue
-                elif (http_rule.hostname.endswith(hostname)):
+                elif (hostname.endswith(http_rule.hostname)):
                     return True
 
             elif (http_rule.hostname_type == "EXACT"):
@@ -782,8 +796,6 @@ class Firewall:
         options_offset = ip_header_length + tcp_header_length
         print("----- HTTP Payload: \n")
         print(packet[options_offset:])
-
-        
 
         if (message_type == "REQUEST"):
             # If payload is nonempty...
@@ -873,8 +885,7 @@ class Firewall:
         # At this point, our http_connection's unparsed request/response are both complete
         if (http_connection.is_request_complete and http_connection.is_response_complete):
            print("##### HTTP CONNECTION: #####\n: %s" % http_connection)
-
-
+           
         return True
         
 
