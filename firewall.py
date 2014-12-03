@@ -86,6 +86,34 @@ class HTTPRule:
         return string_repres
 
 
+class HTTPTransaction:
+    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, host_name="", method="", path="", version="", status_code="", object_size=""):
+        self.unparsed_request = unparsed_request
+        self.unparsed_response = unparsed_response
+        self.is_request_complete = is_request_complete
+        self.is_response_complete = is_response_complete
+        self.host_name = host_name
+        self.method = method
+        self.path = path
+        self.version = version
+        self.status_code = status_code
+        self.object_size = object_size
+
+    def append_to_unparsed_request(self, string_to_append):
+        self.unparsed_request += string_to_append
+
+    def append_to_unparsed_response(self, string_to_append):
+        self.unparsed_response += string_to_append
+
+    def __str__(self):
+        string_repres = "\nHTTPTransaction --\n"
+        string_repres += "Unparsed request: %s\n" % self.unparsed_request
+        string_repres += "Unparsed response: %s\n" % self.unparsed_response
+        string_repres += "Is message complete? %s\n" % (self.is_request_complete and self.is_response_complete)
+        string_repres += "LOG message: (%s, %s, %s, %s, %s, %s)" % (self.host_name, self.method, self.path, self.version, self.status_code, self.object_size)
+        return string_repres
+
+
 class Firewall:
     def __init__(self, config, iface_int, iface_ext):
         self.iface_int = iface_int
@@ -523,9 +551,8 @@ class Firewall:
 
                         # If external port is 80, then we parse bytestream and then use fields in parsed bytestream to check HTTP rules list,
                         # and then decide whether we need to log the HTTP request/response
-                        print("About to generate HTTP message") 
-                        # TCP options start at: Length of packet - ip header length - TCP header length
                         
+                        # TCP options start at: Length of packet - ip header length - TCP header length
                         
                         # Check <5-tuple -> HTTPObject> map, if 5-tuple is not in the map, then message = new HTTPObject.
                         # If 5-tuple IS in the map, then message = map.get(5-tuple)
@@ -593,13 +620,23 @@ class Firewall:
     '''
     def update_http_message(self, packet, message_type):
 
+
         ip_header_length = ord(packet[0:1]) & 0x0f
         ip_header_length = ip_header_length * 4
         
+        # 5-Tuple: (source IP, destination IP, source port, destination port, protocol)
+        source_ip = socket.inet_ntoa(packet[12:16])
+        destination_ip = socket.inet_ntoa(packet[16:20])
+        source_port = struct.unpack('!H', packet[ip_header_length:(ip_header_length + 2)])[0]
+        destination_port = struct.unpack('!H', packet[(ip_header_length + 2):(ip_header_length + 4)])[0]
+        protocol = struct.unpack('!B', packet[9:10])[0]
+
+        # Sequence number of packet
         sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
         
         # message_type is either 'RESPONSE' or 'REQUEST'
         print("\n----- New packet has arrived with sequence number %s! ------" % sequence_number)
+        print("----- This packet has the 5-tuple (%s, %s, %s, %s, %s)" % (source_ip, destination_ip, source_port, destination_port, protocol))
 
         tcp_header_length = ord(packet[(ip_header_length + 12):(ip_header_length + 13)]) >> 4
         tcp_header_length = tcp_header_length * 4
