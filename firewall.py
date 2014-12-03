@@ -87,7 +87,7 @@ class HTTPRule:
 
 
 class HTTPConnection:
-    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, host_name="", method="", path="", version="", status_code="", object_size="", next_expected_sequence_number=None):
+    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, host_name="", method="", path="", version="", status_code="", object_size="", expected_request_seq_no=None, expected_response_seq_no=None):
         self.unparsed_request = unparsed_request
         self.unparsed_response = unparsed_response
         self.is_request_complete = is_request_complete
@@ -98,7 +98,8 @@ class HTTPConnection:
         self.version = version
         self.status_code = status_code
         self.object_size = object_size
-        self.next_expected_sequence_number = next_expected_sequence_number
+        self.expected_request_seq_no = expected_request_seq_no
+        self.expected_response_seq_no = expected_response_seq_no
 
     def append_to_unparsed_request(self, string_to_append):
         self.unparsed_request += string_to_append
@@ -564,12 +565,17 @@ class Firewall:
       
                         # Form 5-tuple
                         five_tuple = (src_ip, dst_ip, source_port, destination_port, "TCP")
-                        if five_tuple in self.http_connections_map:
-                            http_connection = self.http_connections_map[five_tuple]
-                        else:
+                        http_connection = None
+                        for map_five_tuple in self.http_connections_map:
+                            if self.is_same_http_connection(five_tuple, map_five_tuple): 
+                                http_connection = self.http_connections_map[map_five_tuple]
+                                five_tuple = map_five_tuple
+                        if http_connection is None:
                             http_connection = HTTPConnection()
+                            self.http_connections_map[five_tuple] = http_connection
+                        self.update_http_message(pkt, "RESPONSE", http_connection, five_tuple)
 
-                        self.update_http_message(pkt, "RESPONSE", http_connection)
+                         
 
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
@@ -582,12 +588,15 @@ class Firewall:
 
                         # Form 5-tuple
                         five_tuple = (src_ip, dst_ip, source_port, destination_port, "TCP")
-                        if five_tuple in self.http_connections_map:
-                            http_connection = self.http_connections_map[five_tuple]
-                        else:
+                        http_connection = None
+                        for map_five_tuple in self.http_connections_map:
+                            if self.is_same_http_connection(five_tuple, map_five_tuple): 
+                                http_connection = self.http_connections_map[map_five_tuple]
+                                five_tuple = map_five_tuple
+                        if http_connection is None:
                             http_connection = HTTPConnection()
-                        
-                        self.update_http_message(pkt, "REQUEST", http_connection)
+                            self.http_connections_map[five_tuple] = http_connection
+                        self.update_http_message(pkt, "REQUEST", http_connection, five_tuple)
 
                 #print("SENT TCP PACKET")
             else:
@@ -632,8 +641,11 @@ class Firewall:
     '''
     Given a http_connection and a packet whose HTTP payload MAY need to be appended to this http_connection
     update the http_connection object accordingly
+    
+    Returns True if this packet should be passed by handle_packet
+    Returns False if this packet should be dropped by handle_packet
     '''
-    def update_http_message(self, packet, message_type, http_connection):
+    def update_http_message(self, packet, message_type, http_connection, tuple_id):
 
         ip_header_length = ord(packet[0:1]) & 0x0f
         ip_header_length = ip_header_length * 4
@@ -664,43 +676,99 @@ class Firewall:
         print("----- HTTP Payload: \n")
         print(packet[options_offset:])
 
+        
+
         if (message_type == "REQUEST"):
             # If payload is nonempty...
-            if payload_length > 0:
+            if payload_length > 0 and not http_connection.is_request_complete:
                 # If this packet is the first packet in the HTTP request...
-                if http_connection.next_expected_sequence_number is None:
-                    pass
-
-
-
-
-
-
+                if http_connection.expected_request_seq_no is None:
+                    # ...then set our next expected sequence number to this packet's sequence number + 1
+                    http_connection.expected_request_seq_no = sequence_number + 1
+                    # Append payload byte by byte. After every append, check the last 2? bytes to see if we've reached the end of our HTTP request
+                    # Begin appending starting at the beginning of the HTTP payload
+                    counter = options_offset
+                    while (counter < length_of_packet):
+                        byte_to_append = packet[counter:(counter + 1)]
+                        http_connection.append_to_unparsed_request(byte_to_append)
+                        # Check the last four bytes of unparsed request to see if we're finished... if it has four or more bytes to begin with
+                        if (len(http_connection.unparsed_request) >= 4):
+                            # Check whether last four characters of unparsed request are \r\n\r\n; if so, we break because we're done appending
+                            if (http_connection.unparsed_request[-4:] == '\r\n\r\n'):
+                                http_connection.is_request_complete = True
+                                break
+                        counter += 1
+                
+                # Current packet's HTTP payload is NOT the first packet in the HTTP request
+                else:
+                    # Check sequence number of this packet to find out what to do with its payload...
+                    
+                    if (sequence_number > http_connection.expected_request_seq_no):
+                        print("Out of order packet! Drop it!")
+                        return False
+                    elif (sequence_number < http_connection.expected_request_seq_no):
+                        # Simply return the packet, because its sequence number is smaller than the sequence number that we expect
+                        return True
+                    elif (sequence_number == http_connection.expected_request_seq_no):
+                        
+                        http_connection.expected_request_seq_no += 1
+                        
+                        # Append payload byte by byte. After every append, check the last 2? bytes to see if we've reached the end of our HTTP request
+                        # Begin appending starting at the beginning of the HTTP payload
+                        counter = options_offset
+                        while (counter < length_of_packet):
+                            byte_to_append = packet[counter:(counter + 1)]
+                            http_connection.append_to_unparsed_request(byte_to_append)
+                            # Check the last four bytes of unparsed request to see if we're finished... if it has four or more bytes to begin with
+                            if (len(http_connection.unparsed_request) >= 4):
+                                # Check whether last four characters of unparsed request are \r\n\r\n; if so, we break because we're done appending
+                                if (http_connection.unparsed_request[-4:] == '\r\n\r\n'):
+                                    # If request is done being appended, change the boolean variable in our http connection object
+                                    http_connection.is_request_complete = True
+                                    break
+                            counter += 1
+       
         elif (message_type == "RESPONSE"):
-            pass
+            if payload_length > 0 and not http_connection.is_response_complete:
+                if http_connection.expected_response_seq_no is None:
+                    http_connection.expected_response_seq_no = sequence_number + 1
+                    counter = options_offset
+                    while (counter < length_of_packet):
+                        byte_to_append = packet[counter:(counter + 1)]
+                        http_connection.append_to_unparsed_response(byte_to_append)
+                        if (len(http_connection.unparsed_response) >= 4):
+                            if (http_connection.unparsed_response[-4:] == '\r\n\r\n'):
+                                http_connection.is_response_complete = True
+                                print("response has been marked as complete")
+                                break
+                        counter += 1
+                else:
+                    if (sequence_number > http_connection.expected_response_seq_no):
+                        print("Out of order packet! Drop it!")
+                        return False
+                    elif (sequence_number < http_connection.expected_response_seq_no):
+                        return True
+                    elif (sequence_number == http_connection.expected_response_seq_no):
+                        http_connection.expected_response_seq_no += 1
+                        counter = options_offset
+                        while (counter < length_of_packet):
+                            byte_to_append = packet[counter:(counter + 1)]
+                            http_connection.append_to_unparsed_response(byte_to_append)
+                            if (len(http_connection.unparsed_response) >= 4):
+                                if (http_connection.unparsed_response[-4:] == '\r\n\r\n'):
+                                    http_connection.is_response_complete = True
+                                    print("response has been marked as complete")
+                                    break
+                            counter += 1
 
-        '''
-        Each packet that gets passed into this method is potentially a fragment of the current TCP message (i.e. HTTP request or response)
-        Determine if packet contains HTTP REQUEST or RESPONSE
+        print("is request complete: %s; is response complete: %s" % (http_connection.is_request_complete, http_connection.is_response_complete))
+
+        # At this point, our http_connection's unparsed request/response are both complete
+        if (http_connection.is_request_complete and http_connection.is_response_complete):
+            print("##### HTTP CONNECTION: #####\n: %s" % http_connection)
+            del self.http_connections_map[tuple_id] 
+
         
-        3-situations, based on the packet's sequence number:
-        (note that sequence numbers can wrap around)
-        (1) seq_no > sequence number that we expect:
-            drop the packet
-        (2) seq_no == sequence number that we expect:
-            parse this packet's HTTP request or response, and append to our http_message_object
-            
-            After this append, check for completion of our message object's request and response:
-             
-            If both the HTTP request and response are done, then:
-                Look at the request's hostname, and look at our HTTPRules list. Determine from the rules list whether we need to log this HTTP Request/Response
-            Else:
-                return 
-
-        (3) seq_no < sequence number that we expect:
-            pass the packet through without appending
-        '''
-
 
     '''
     Returns true if the ICMP packet with destination_ip and icmp_type should be passed, and false if it should be dropped
@@ -1204,7 +1272,7 @@ class Firewall:
     Given two 5-tuples for connection identification, checks to see whether the two 5-tuples are equivalent (i.e. correspond to the same connection)
     (connection_one and connection_two are both 5-tuples)
     '''
-    def is_same_http_connection(connection_one, connection_two):
+    def is_same_http_connection(self, connection_one, connection_two):
         connection_one_set = set(connection_one) 
         connection_two_set = set(connection_two)
         return (connection_one_set.issubset(connection_two_set) and connection_one_set.issuperset(connection_two_set))
