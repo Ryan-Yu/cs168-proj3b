@@ -86,8 +86,8 @@ class HTTPRule:
         return string_repres
 
 
-class HTTPTransaction:
-    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, host_name="", method="", path="", version="", status_code="", object_size=""):
+class HTTPConnection:
+    def __init__(self, unparsed_request="", unparsed_response="", is_request_complete=False, is_response_complete=False, host_name="", method="", path="", version="", status_code="", object_size="", next_expected_sequence_number=None):
         self.unparsed_request = unparsed_request
         self.unparsed_response = unparsed_response
         self.is_request_complete = is_request_complete
@@ -98,6 +98,7 @@ class HTTPTransaction:
         self.version = version
         self.status_code = status_code
         self.object_size = object_size
+        self.next_expected_sequence_number = next_expected_sequence_number
 
     def append_to_unparsed_request(self, string_to_append):
         self.unparsed_request += string_to_append
@@ -106,7 +107,7 @@ class HTTPTransaction:
         self.unparsed_response += string_to_append
 
     def __str__(self):
-        string_repres = "\nHTTPTransaction --\n"
+        string_repres = "\nHTTPConnection --\n"
         string_repres += "Unparsed request: %s\n" % self.unparsed_request
         string_repres += "Unparsed response: %s\n" % self.unparsed_response
         string_repres += "Is message complete? %s\n" % (self.is_request_complete and self.is_response_complete)
@@ -135,12 +136,14 @@ class Firewall:
         self.icmp_rules_list = []
         self.http_rules_list = []
 
-
         self.initialize_all_maps(self.rules_file)
 
         ########## End of initialization of rules lists ##########
         
-        
+        ########## Initialize HTTP connections map ##########
+
+        self.http_connections_map = {}
+
         for udp_rule in self.udp_rules_list:
             print(udp_rule)
 
@@ -543,6 +546,7 @@ class Firewall:
 
             send_packet = self.make_decision_on_tcp_packet(pkt_dir, external_ip, external_port, internal_ip, internal_port, pkt)                
             if send_packet:
+                
                 if pkt_dir == PKT_DIR_INCOMING:
                     self.iface_int.send_ip_packet(pkt)
                     
@@ -552,16 +556,20 @@ class Firewall:
                         # If external port is 80, then we parse bytestream and then use fields in parsed bytestream to check HTTP rules list,
                         # and then decide whether we need to log the HTTP request/response
                         
-                        # TCP options start at: Length of packet - ip header length - TCP header length
-                        
                         # Check <5-tuple -> HTTPObject> map, if 5-tuple is not in the map, then message = new HTTPObject.
                         # If 5-tuple IS in the map, then message = map.get(5-tuple)
                         # Pass message into update_http_message function call
                         # In the update_http_message function call, we will determine whether we need to append to this message,
                         # based on the packet's sequence number, and the sequence number that we next expect
-                        self.update_http_message(pkt, "RESPONSE")
+      
+                        # Form 5-tuple
+                        five_tuple = (src_ip, dst_ip, source_port, destination_port, "TCP")
+                        if five_tuple in self.http_connections_map:
+                            http_connection = self.http_connections_map[five_tuple]
+                        else:
+                            http_connection = HTTPConnection()
 
-                        
+                        self.update_http_message(pkt, "RESPONSE", http_connection)
 
                 elif pkt_dir == PKT_DIR_OUTGOING:
                     self.iface_ext.send_ip_packet(pkt)
@@ -572,9 +580,14 @@ class Firewall:
                         # If external port is 80, then we parse bytestream and then use fields in parsed bytestream to check HTTP rules list,
                         # and then decide whether we need to log the HTTP request/response
 
+                        # Form 5-tuple
+                        five_tuple = (src_ip, dst_ip, source_port, destination_port, "TCP")
+                        if five_tuple in self.http_connections_map:
+                            http_connection = self.http_connections_map[five_tuple]
+                        else:
+                            http_connection = HTTPConnection()
                         
-
-                        self.update_http_message(pkt, "REQUEST")
+                        self.update_http_message(pkt, "REQUEST", http_connection)
 
                 #print("SENT TCP PACKET")
             else:
@@ -617,9 +630,10 @@ class Firewall:
         
 
     '''
+    Given a http_connection and a packet whose HTTP payload MAY need to be appended to this http_connection
+    update the http_connection object accordingly
     '''
-    def update_http_message(self, packet, message_type):
-
+    def update_http_message(self, packet, message_type, http_connection):
 
         ip_header_length = ord(packet[0:1]) & 0x0f
         ip_header_length = ip_header_length * 4
@@ -635,7 +649,7 @@ class Firewall:
         sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
         
         # message_type is either 'RESPONSE' or 'REQUEST'
-        print("\n----- New packet has arrived with sequence number %s! ------" % sequence_number)
+        print("\n----- New packet has arrived with sequence number %s and message type %s! ------" % (sequence_number, message_type))
         print("----- This packet has the 5-tuple (%s, %s, %s, %s, %s)" % (source_ip, destination_ip, source_port, destination_port, protocol))
 
         tcp_header_length = ord(packet[(ip_header_length + 12):(ip_header_length + 13)]) >> 4
@@ -649,6 +663,21 @@ class Firewall:
         options_offset = ip_header_length + tcp_header_length
         print("----- HTTP Payload: \n")
         print(packet[options_offset:])
+
+        if (message_type == "REQUEST"):
+            # If payload is nonempty...
+            if payload_length > 0:
+                # If this packet is the first packet in the HTTP request...
+                if http_connection.next_expected_sequence_number is None:
+                    pass
+
+
+
+
+
+
+        elif (message_type == "RESPONSE"):
+            pass
 
         '''
         Each packet that gets passed into this method is potentially a fragment of the current TCP message (i.e. HTTP request or response)
@@ -1171,58 +1200,16 @@ class Firewall:
         return total_sum 
 
 
-
-        '''
-        print("My total sum in decimal: %s" % total_sum)
-        print("Total sum in binary: %s" % bin(total_sum))
-        
-        # Extract first four bits of our sum as a binary string
-        first_four_bits = bin(total_sum)[:6]
-
-        # Isolate the remainder of our sum as a binary string
-        final_segment = bin(total_sum)[6:]
-        final_segment = '0b%s' % final_segment
-        number_of_zeros_to_pad = 0
-        for i in range(2, len(final_segment) - 2):
-            if final_segment[i] == '0':
-                number_of_zeros_to_pad += 1
-            else:
-                break
-       
-        print("number of zeros to pad: %s" % number_of_zeros_to_pad)
-
-        # Add the carry and the remainder
-        summed_segment = bin(int(first_four_bits, 2) + int(final_segment, 2))
-
-        print("summed segment: %s" % summed_segment)
-
-        # Pad our pre-flipped checksum
-        padded_summed_segment = '0b'
-        while number_of_zeros_to_pad > 0:
-            padded_summed_segment += '0'
-            number_of_zeros_to_pad -= 1
-       
-        for i in range (2, len(summed_segment)):
-            padded_summed_segment += summed_segment[i]
-
-        print("padded summed segment: %s" % padded_summed_segment)
-
-        # Flip all bits in summed_segment
-        final_checksum = '0b'
-        index = 2
-        while (index < len(padded_summed_segment)):
-            if (padded_summed_segment[index] == '0'):
-                final_checksum += '1'
-            else:
-                final_checksum += '0'
-            index += 1
-  
-        decimal_final_checksum = int(final_checksum, 2)
-        return decimal_final_checksum
-        '''
-
-
-
+    '''
+    Given two 5-tuples for connection identification, checks to see whether the two 5-tuples are equivalent (i.e. correspond to the same connection)
+    (connection_one and connection_two are both 5-tuples)
+    '''
+    def is_same_http_connection(connection_one, connection_two):
+        connection_one_set = set(connection_one) 
+        connection_two_set = set(connection_two)
+        return (connection_one_set.issubset(connection_two_set) and connection_one_set.issuperset(connection_two_set))
+    
+    
     '''
     Converts a CIDR IP address (i.e. 1.1.1.1/24) to an IP range.
 
