@@ -477,10 +477,10 @@ class Firewall:
                         elif pkt_dir == PKT_DIR_OUTGOING:
                             self.iface_ext.send_ip_packet(pkt)
 
-                        print("SENT DNS PACKET")
+                        # print("SENT DNS PACKET")
                     else:
                         # We've dropped our packet, so just return
-                        print("DROPPED DNS PACKET")
+                        # print("DROPPED DNS PACKET")
                         return
                 
                 # Not a DNS query packet (it is a regular UDP packet)
@@ -613,10 +613,10 @@ class Firewall:
                             del self.http_connections_map[five_tuple]
                     else:
                         self.iface_ext.send_ip_packet(pkt)
-                #print("SENT TCP PACKET")
+                # print("SENT TCP PACKET")
             else:
                 # We've dropped our packet, so just return
-                print("DROPPED TCP PACKET")
+                # print("DROPPED TCP PACKET")
                 return
 
 
@@ -669,7 +669,6 @@ class Firewall:
                 hostname += http_connection.unparsed_request[index_of_host_field]
                 index_of_host_field += 1
             hostname = hostname.strip()
-            print("Hostname: %s" % hostname)
             
             if (hostname.translate(None, '.').isdigit()):
                 # Our host is an IP address (i.e. all numbers)
@@ -717,10 +716,7 @@ class Firewall:
             line_to_write_to_file += content_length
             line_to_write_to_file += '\n'
            
-            print("*******THE LINE THAT WE'RE about to write is: %s" % line_to_write_to_file)
-
             if not http_connection.is_connection_written:
-                print("------------JUST WROTE THE LINE ABOVE")
                 logging_file = open('http.log', 'a')
                 logging_file.write(line_to_write_to_file)
                 logging_file.flush()
@@ -734,18 +730,12 @@ class Firewall:
     '''
     def make_decision_on_http_logging(self, hostname, is_ip_address):
         
-        print("##### About to make a decision on http logging for hostname: %s" % hostname)
-
         for http_rule in self.http_rules_list:
             if (http_rule.hostname_type == "IP"):
 
-                print("PARAMETER HOSTNAME: %s (type: %s); HTTP RULE HOSTNAME: %s (type: %s)" % (hostname, type(hostname), http_rule.hostname, type(http_rule.hostname)))
-                print(hostname == http_rule.hostname)
-                print(hostname.strip() == http_rule.hostname.strip())
                 if not is_ip_address:
                     continue
                 elif hostname == http_rule.hostname:
-                    print("########### WE'VE MATCHED OUR IP!!!!!!")
                     return True
 
             elif (http_rule.hostname_type == "WILDCARD"):
@@ -790,20 +780,17 @@ class Firewall:
         sequence_number = struct.unpack('!L', packet[(ip_header_length + 4):(ip_header_length + 8)])[0]
         
         # message_type is either 'RESPONSE' or 'REQUEST'
-        print("\n----- New packet has arrived with sequence number %s and message type %s! ------" % (sequence_number, message_type))
-        print("----- This packet has the 5-tuple (%s, %s, %s, %s, %s)" % (source_ip, destination_ip, source_port, destination_port, protocol))
-
         tcp_header_length = ord(packet[(ip_header_length + 12):(ip_header_length + 13)]) >> 4
         tcp_header_length = tcp_header_length * 4
 
         length_of_packet = struct.unpack('!H', packet[2:4])[0]
         payload_length = length_of_packet - ip_header_length - tcp_header_length
         
-        print("Length of packet: %s; IP header length: %s; TCP header length: %s; Length of payload: %s" % (length_of_packet, ip_header_length, tcp_header_length, payload_length))
+        # print("Length of packet: %s; IP header length: %s; TCP header length: %s; Length of payload: %s" % (length_of_packet, ip_header_length, tcp_header_length, payload_length))
 
         options_offset = ip_header_length + tcp_header_length
-        print("----- HTTP Payload: \n")
-        print(packet[options_offset:])
+        # print("----- HTTP Payload: \n")
+        # print(packet[options_offset:])
 
         if (message_type == "REQUEST"):
             # If payload is nonempty...
@@ -876,7 +863,6 @@ class Firewall:
                             if (len(http_connection.unparsed_response) >= 4):
                                 if (http_connection.unparsed_response[-4:] == '\r\n\r\n'):
                                     http_connection.is_response_complete = True
-                                    print("response has been marked as complete")
                                     break
                             counter += 1
                     else:
@@ -890,8 +876,6 @@ class Firewall:
                         return True
                     elif (sequence_number == http_connection.expected_response_seq_no):
                         
-                        print("-------------------- CORRECT SEQUENCE NUMBER ON A FRAGMENTATION")
-                        
                         http_connection.expected_response_seq_no += payload_length
                         counter = options_offset
                         while (counter < length_of_packet):
@@ -900,11 +884,8 @@ class Firewall:
                             if (len(http_connection.unparsed_response) >= 4):
                                 if (http_connection.unparsed_response[-4:] == '\r\n\r\n'):
                                     http_connection.is_response_complete = True
-                                    print("response has been marked as complete")
                                     break
                             counter += 1
-
-        print("is request complete: %s; is response complete: %s" % (http_connection.is_request_complete, http_connection.is_response_complete))
 
         # At this point, our http_connection's unparsed request/response are both complete
         if (http_connection.is_request_complete and http_connection.is_response_complete):
@@ -1211,7 +1192,7 @@ class Firewall:
         ip_checksum = struct.pack('!H', self.calculate_checksum(20, dns_deny_packet_to_send))
         dns_deny_packet_to_send = dns_deny_packet_to_send[0:10] + ip_checksum + dns_deny_packet_to_send[12:]
 
-        udp_checksum = struct.pack('!H', self.calculate_tcp_checksum(0, 20, dns_deny_packet_to_send))
+        udp_checksum = struct.pack('!H', self.calculate_tcp_checksum(20, dns_deny_packet_to_send))
         dns_deny_packet_to_send = dns_deny_packet_to_send[0:26] + udp_checksum + dns_deny_packet_to_send[28:]
         return dns_deny_packet_to_send
 
@@ -1283,102 +1264,62 @@ class Firewall:
         # Calculate IP checksum and pack
        
         reset_packet_checksum = struct.pack('!H', self.calculate_checksum(ip_header_length, reset_packet_to_send))
+        
         reset_packet_to_send = reset_packet_to_send[0:10] + reset_packet_checksum + reset_packet_to_send[12:]
-
+       
         # Calculate TCP checksum and pack
-        reset_packet_tcp_checksum = struct.pack('!H', self.calculate_tcp_checksum(packet_total_length, ip_header_length * 4, reset_packet_to_send))
+        reset_packet_tcp_checksum = struct.pack('!H', self.calculate_tcp_checksum(ip_header_length, reset_packet_to_send))
         reset_packet_to_send = reset_packet_to_send[0:36] + reset_packet_tcp_checksum + reset_packet_to_send[38:]
-
         return reset_packet_to_send
 
     
-    def calculate_tcp_checksum(self, total_length, ip_header_length, packet):
+    def calculate_tcp_checksum(self, header_len, packet):
         total_len = struct.unpack('!H', packet[2:4])[0]
-        header_len = (struct.unpack('!B', packet[0:1])[0] & 0x0F) * 4
-        protocol = struct.unpack('!B', packet[9:10])[0]
-
         if total_len % 2 != 0:
-            new_len = total_len + 1
             packet += struct.pack('!B', 0)
-        else:
-            new_len = total_len
+            total_len += 1
 
-        checksum = 0
-        if (protocol == 6): #TCP
-            prot = "tcp"
-            orig_chksum = struct.unpack('!H', packet[header_len + 16:header_len + 18])[0] #TCP
-            for i in range(header_len, new_len, 2):
-                if i != (header_len + 16):
-                    checksum += struct.unpack("!H", packet[i: i+ 2])[0]
-        elif (protocol == 17): #UDP
-            prot = "udp"
-            orig_chksum = struct.unpack('!H', packet[header_len + 6:header_len + 8])[0] #UDP
-            for i in range(header_len, new_len, 2):
-                if i != (header_len + 6):
-                    checksum += struct.unpack("!H", packet[i: i+ 2])[0]
-
-        checksum += struct.unpack("!H", packet[12:14])[0] #src address
-        checksum += struct.unpack("!H", packet[14:16])[0] #src address
-        checksum += struct.unpack("!H", packet[16:18])[0] #dst address
-        checksum += struct.unpack("!H", packet[18:20])[0] #dst address
-
-        checksum += protocol #protocol number
-        checksum += total_len - header_len #length
-
-        checksum = (checksum >> 16) + (checksum & 0xFFFF)
-        checksum += (checksum >> 16)
-        checksum = ~checksum & 0xFFFF
-
-        return checksum       
-
-    def calculate_tcp_checksum2(self, total_length, ip_header_length, packet):
-      
+        protocol = struct.unpack('!B', packet[9:10])[0]
+        byte_counter = header_len
+        total_sum = 0
+        if (protocol == 6):
+            while (byte_counter < total_len):
+                if (byte_counter == header_len + 16):
+                    byte_counter += 2
+                    continue
+                total_sum += struct.unpack('!H', packet[byte_counter:(byte_counter + 2)])[0]
+                byte_counter += 2
+        elif (protocol == 17):
+            while (byte_counter < total_len):
+                if (byte_counter == header_len + 6):
+                    byte_counter += 2
+                    continue
+                total_sum += struct.unpack('!H', packet[byte_counter:(byte_counter + 2)])[0]
+                byte_counter += 2
+       
+        # Append source IP address
         source_ip = struct.unpack('!H', packet[12:14])[0]
         source_ip_segment_2 = struct.unpack('!H', packet[14:16])[0]
         destination_ip = struct.unpack('!H', packet[16:18])[0]
         destination_ip_segment_2 = struct.unpack('!H', packet[18:20])[0]
 
-        byte_counter = ip_header_length
-        total_sum = 0
+        total_sum += (source_ip + source_ip_segment_2 + destination_ip + destination_ip_segment_2)
 
-        # Parse up to the tcp checksum, which starts at byte 16
-        while (byte_counter < total_length):
-            # Skip 2 bytes of tcp checksum
-            if (byte_counter == (16 + ip_header_length)):
-                byte_counter += 2
-                continue
-            total_sum += struct.unpack('!H', packet[byte_counter:(byte_counter + 2)])[0]    
-            byte_counter += 2
-       
-        # Add on the source IP, destination IP, protocol (always 6), total 16-bit TCP length
-        total_sum += source_ip + source_ip_segment_2
-        total_sum += destination_ip + destination_ip_segment_2
-        total_sum += 6
-        total_sum += (total_length - ip_header_length)
+        # Append protocol
+        total_sum += protocol
 
-        # Extract first four bits of our sum as a binary string
-        first_four_bits = bin(total_sum)[:6]
+        # Append length
+        total_sum += total_len - header_len
+        left_four_bits = total_sum >> 16
+        remaining_bits = total_sum & 0xFFFF
+        total_sum = left_four_bits + remaining_bits
 
-        # Isolate the remainder of our sum as a binary string
-        final_segment = bin(total_sum)[6:]
-        final_segment = '0b%s' % final_segment
+        total_sum += (total_sum >> 16)
+        flipped_bits = ~total_sum
+        total_sum = flipped_bits & 0xFFFF
 
-        # Add the carry and the remainder
-        summed_segment = bin(int(first_four_bits, 2) + int(final_segment, 2))
-       
-        # Flip all bits in summed_segment
-        final_checksum = '0b'
-        index = 2
-        while (index < len(summed_segment)):
-            if (summed_segment[index] == '0'):
-                final_checksum += '1'
-            else:
-                final_checksum += '0'
-            index += 1
-  
-        decimal_final_checksum = int(final_checksum, 2)
-        return decimal_final_checksum
-
+        return total_sum
+    
 
     '''
     Calculates a new checksum (in decimal) based off of an IPv4 header, and a header_length (given in bytes)
