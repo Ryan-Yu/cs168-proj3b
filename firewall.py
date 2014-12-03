@@ -670,6 +670,10 @@ class Firewall:
                 index_of_host_field += 1
             hostname = hostname.strip()
             print("Hostname: %s" % hostname)
+            
+            if (hostname.translate(None, '.').isdigit()):
+                # Our host is an IP address (i.e. all numbers)
+                hostname_is_ip_address = True
         else:
             hostname = external_ip
             hostname_is_ip_address = True
@@ -735,9 +739,14 @@ class Firewall:
 
         for http_rule in self.http_rules_list:
             if (http_rule.hostname_type == "IP"):
+
+                print("PARAMETER HOSTNAME: %s (type: %s); HTTP RULE HOSTNAME: %s (type: %s)" % (hostname, type(hostname), http_rule.hostname, type(http_rule.hostname)))
+                print(hostname == http_rule.hostname)
+                print(hostname.strip() == http_rule.hostname.strip())
                 if not is_ip_address:
                     continue
                 elif hostname == http_rule.hostname:
+                    print("########### WE'VE MATCHED OUR IP!!!!!!")
                     return True
 
             elif (http_rule.hostname_type == "WILDCARD"):
@@ -824,7 +833,7 @@ class Firewall:
                     
                     if (sequence_number > http_connection.expected_request_seq_no):
                         print("Out of order packet! Drop it!")
-                        return False
+                        #return False
                     elif (sequence_number < http_connection.expected_request_seq_no):
                         # Simply return the packet, because its sequence number is smaller than the sequence number that we expect
                         return True
@@ -864,7 +873,7 @@ class Firewall:
                 else:
                     if (sequence_number > http_connection.expected_response_seq_no):
                         print("Out of order packet! Drop it!")
-                        return False
+                        #return False
                     elif (sequence_number < http_connection.expected_response_seq_no):
                         return True
                     elif (sequence_number == http_connection.expected_response_seq_no):
