@@ -680,7 +680,6 @@ class Firewall:
 
         # Check rules list, and see whether the current request/response should be logged
         if self.make_decision_on_http_logging(hostname, hostname_is_ip_address):
-            print("-=---------TOP OF MAKE DECISION IF STATEMENT")
             # hostname, method, path, version, status_code, object_size
             line_to_write_to_file += hostname
             line_to_write_to_file += " "
@@ -812,7 +811,7 @@ class Firewall:
                 # If this packet is the first packet in the HTTP request...
                 if http_connection.expected_request_seq_no is None:
                     # ...then set our next expected sequence number to this packet's sequence number + 1
-                    http_connection.expected_request_seq_no = sequence_number + 1
+                    http_connection.expected_request_seq_no = sequence_number + payload_length
                     # Append payload byte by byte. After every append, check the last 2? bytes to see if we've reached the end of our HTTP request
                     # Begin appending starting at the beginning of the HTTP payload
                     counter = options_offset
@@ -833,13 +832,13 @@ class Firewall:
                     
                     if (sequence_number > http_connection.expected_request_seq_no):
                         print("Out of order packet! Drop it!")
-                        #return False
+                        return False
                     elif (sequence_number < http_connection.expected_request_seq_no):
                         # Simply return the packet, because its sequence number is smaller than the sequence number that we expect
                         return True
                     elif (sequence_number == http_connection.expected_request_seq_no):
                         
-                        http_connection.expected_request_seq_no += 1
+                        http_connection.expected_request_seq_no += payload_length
                         
                         # Append payload byte by byte. After every append, check the last 2? bytes to see if we've reached the end of our HTTP request
                         # Begin appending starting at the beginning of the HTTP payload
@@ -859,7 +858,7 @@ class Firewall:
         elif (message_type == "RESPONSE"):
             if payload_length > 0 and not http_connection.is_response_complete:
                 if http_connection.expected_response_seq_no is None:
-                    http_connection.expected_response_seq_no = sequence_number + 1
+                    http_connection.expected_response_seq_no = sequence_number + payload_length
                     counter = options_offset
                     while (counter < length_of_packet):
                         byte_to_append = packet[counter:(counter + 1)]
@@ -873,11 +872,11 @@ class Firewall:
                 else:
                     if (sequence_number > http_connection.expected_response_seq_no):
                         print("Out of order packet! Drop it!")
-                        #return False
+                        return False
                     elif (sequence_number < http_connection.expected_response_seq_no):
                         return True
                     elif (sequence_number == http_connection.expected_response_seq_no):
-                        http_connection.expected_response_seq_no += 1
+                        http_connection.expected_response_seq_no += payload_length
                         counter = options_offset
                         while (counter < length_of_packet):
                             byte_to_append = packet[counter:(counter + 1)]
